@@ -137,7 +137,7 @@ class FraudEnsemble:
         if verbose:
             print(
                 f"[AE] Training on {len(X_legit):,} legit transactions "
-                f"({input_dim := X_legit.shape[1]} features)"
+                f"({X_legit.shape[1]} features)"
             )
         self.ae_trainer.fit(
             X_legit, X_val_ae, epochs=self.ae_epochs, patience=ae_patience, verbose=verbose

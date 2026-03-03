@@ -1,0 +1,155 @@
+{
+  "1_logistic_baseline": {
+    "auc_pr": 0.3285,
+    "auc_roc": 0.7709,
+    "precision": 0.158,
+    "recall": 0.881,
+    "f1": 0.2679,
+    "false_negative_rate": 0.119,
+    "false_positives": 4696,
+    "false_negatives": 119,
+    "true_positives": 881,
+    "true_negatives": 4304,
+    "variant": "Logistic Regression (basic features)"
+  },
+  "2_xgb_smote": {
+    "auc_pr": 0.4474,
+    "auc_roc": 0.8097,
+    "precision": 0.2163,
+    "recall": 0.761,
+    "f1": 0.3368,
+    "false_negative_rate": 0.239,
+    "false_positives": 2758,
+    "false_negatives": 239,
+    "true_positives": 761,
+    "true_negatives": 6242,
+    "variant": "XGBoost only (SMOTE)"
+  },
+  "3_xgb_costsensitive": {
+    "auc_pr": 0.7295,
+    "auc_roc": 0.9202,
+    "precision": 0.4538,
+    "recall": 0.79,
+    "f1": 0.5764,
+    "false_negative_rate": 0.21,
+    "false_positives": 951,
+    "false_negatives": 210,
+    "true_positives": 790,
+    "true_negatives": 8049,
+    "variant": "XGBoost only (cost-sensitive)"
+  },
+  "4_full_ensemble": {
+    "auc_pr": 0.4626,
+    "auc_roc": 0.8105,
+    "precision": 0.1655,
+    "recall": 0.859,
+    "f1": 0.2775,
+    "false_negative_rate": 0.141,
+    "false_positives": 4332,
+    "false_negatives": 141,
+    "true_positives": 859,
+    "true_negatives": 4668,
+    "variant": "Full Ensemble (AE + XGB + SMOTE) \u2190 OUR MODEL",
+    "auc_pr_95ci": [
+      0.4325,
+      0.496
+    ]
+  },
+  "5_no_velocity": {
+    "auc_pr": 0.4336,
+    "auc_roc": 0.8111,
+    "precision": 0.1645,
+    "recall": 0.859,
+    "f1": 0.2762,
+    "false_negative_rate": 0.141,
+    "false_positives": 4362,
+    "false_negatives": 141,
+    "true_positives": 859,
+    "true_negatives": 4638,
+    "variant": "Ensemble \u2014 no velocity features",
+    "features_dropped": [
+      "velocity_count_1h",
+      "velocity_sum_1h",
+      "velocity_std_1h",
+      "velocity_count_6h",
+      "velocity_sum_6h",
+      "velocity_std_6h",
+      "velocity_count_24h",
+      "velocity_sum_24h",
+      "velocity_std_24h"
+    ]
+  },
+  "6_no_haversine": {
+    "auc_pr": 0.4728,
+    "auc_roc": 0.8056,
+    "precision": 0.2384,
+    "recall": 0.759,
+    "f1": 0.3628,
+    "false_negative_rate": 0.241,
+    "false_positives": 2425,
+    "false_negatives": 241,
+    "true_positives": 759,
+    "true_negatives": 6575,
+    "variant": "Ensemble \u2014 no haversine/address features",
+    "features_dropped": [
+      "addr_distance_km",
+      "addr_mismatch"
+    ]
+  },
+  "7_no_merchant_risk": {
+    "auc_pr": 0.4455,
+    "auc_roc": 0.8115,
+    "precision": 0.1951,
+    "recall": 0.819,
+    "f1": 0.3152,
+    "false_negative_rate": 0.181,
+    "false_positives": 3378,
+    "false_negatives": 181,
+    "true_positives": 819,
+    "true_negatives": 5622,
+    "variant": "Ensemble \u2014 no merchant risk",
+    "features_dropped": [
+      "merchant_fraud_rate",
+      "merchant_tx_count",
+      "high_risk_merchant"
+    ]
+  },
+  "8_no_smote": {
+    "auc_pr": 0.6964,
+    "auc_roc": 0.9093,
+    "precision": 0.4004,
+    "recall": 0.784,
+    "f1": 0.5301,
+    "false_negative_rate": 0.216,
+    "false_positives": 1174,
+    "false_negatives": 216,
+    "true_positives": 784,
+    "true_negatives": 7826,
+    "variant": "Ensemble \u2014 no SMOTE (cost-sensitive)"
+  },
+  "sig_lr_vs_full": {
+    "comparison": "Full ensemble vs lr",
+    "p_value": 0.0,
+    "significant": true
+  },
+  "sig_xgb_smote_vs_full": {
+    "comparison": "Full ensemble vs xgb_smote",
+    "p_value": 0.028,
+    "significant": true
+  },
+  "sig_xgb_cs_vs_full": {
+    "comparison": "Full ensemble vs xgb_cs",
+    "p_value": 1.0,
+    "significant": false
+  },
+  "_summary": {
+    "precision_improvement_vs_best_baseline_pct": -63.53,
+    "fnr_reduction_vs_best_baseline_pct": -18.49,
+    "full_ensemble_auc_pr_95ci": [
+      0.4325,
+      0.496
+    ],
+    "best_baseline": "xgb_smote",
+    "total_time_s": 51.2
+  }
+}

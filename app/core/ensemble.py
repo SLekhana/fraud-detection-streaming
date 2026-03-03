@@ -104,6 +104,7 @@ class FraudEnsemble:
         self.xgb_model = xgb.XGBClassifier(**default_xgb)
         self.explainer: Optional[shap.TreeExplainer] = None
         self.feature_names: list[str] = []
+        self.calibrator = None  # IsotonicRegression for probability calibration
 
     # ── Fit ──────────────────────────────────────────────────────────────────
 
@@ -199,10 +200,13 @@ class FraudEnsemble:
     # ── Predict ──────────────────────────────────────────────────────────────
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Return fraud probability for each sample."""
+        """Return fraud probability for each sample (isotonic-calibrated if available)."""
         X_scaled = self.scaler.transform(X)
         X_aug = self._augment(X_scaled)
-        return self.xgb_model.predict_proba(X_aug)[:, 1]
+        raw_proba = self.xgb_model.predict_proba(X_aug)[:, 1]
+        if self.calibrator is not None:
+            return self.calibrator.predict(raw_proba)
+        return raw_proba
 
     def predict(self, X: np.ndarray, threshold: float = 0.5) -> np.ndarray:
         return (self.predict_proba(X) >= threshold).astype(int)
@@ -319,10 +323,13 @@ class FraudEnsemble:
         self.xgb_model.save_model(os.path.join(directory, "xgboost.json"))
         import joblib
         joblib.dump(self.scaler, os.path.join(directory, "scaler.pkl"))
+        if self.calibrator is not None:
+            joblib.dump(self.calibrator, os.path.join(directory, "calibrator.pkl"))
         meta = {
             "input_dim": self.input_dim,
             "feature_names": self.feature_names,
             "ae_threshold": self.ae_trainer.threshold,
+            "calibrated": self.calibrator is not None,
         }
         with open(os.path.join(directory, "meta.json"), "w") as f:
             json.dump(meta, f, indent=2)
@@ -343,6 +350,9 @@ class FraudEnsemble:
         ensemble.scaler = joblib.load(os.path.join(directory, "scaler.pkl"))
         ensemble.feature_names = meta.get("feature_names", [])
         ensemble.explainer = shap.TreeExplainer(ensemble.xgb_model)
+        cal_path = os.path.join(directory, "calibrator.pkl")
+        if os.path.exists(cal_path):
+            ensemble.calibrator = joblib.load(cal_path)
         return ensemble
 
     # ── Internal helpers ─────────────────────────────────────────────────────

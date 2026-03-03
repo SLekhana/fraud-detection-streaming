@@ -1,0 +1,30 @@
+{
+  "before_calibration": {
+    "precision": 0.2565,
+    "recall": 0.7928,
+    "f1": 0.3876,
+    "auc_pr": 0.6193,
+    "auc_roc": 0.934
+  },
+  "after_calibration": {
+    "precision": 0.8187,
+    "recall": 0.4109,
+    "f1": 0.5472,
+    "auc_pr": 0.6068,
+    "auc_roc": 0.934
+  },
+  "prob_distribution_before": {
+    "p10": 0.0205,
+    "p50": 0.1225,
+    "p90": 0.5216,
+    "pct_above_0.5": 0.1081
+  },
+  "prob_distribution_after": {
+    "p10": 0.0002,
+    "p50": 0.0034,
+    "p90": 0.0536,
+    "pct_above_0.5": 0.0176
+  },
+  "calibration_set_size": 59054,
+  "evaluation_set_size": 59054
+}

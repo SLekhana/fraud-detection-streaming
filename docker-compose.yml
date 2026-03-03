@@ -137,7 +137,8 @@ services:
 
   # ─── Spark (streaming job) ────────────────────────────────────────────────
   spark:
-    image: bitnami/spark:3.5.1
+    image: apache/spark:3.5.0
+    platform: linux/amd64
     container_name: fraud_spark
     depends_on:
       kafka:

@@ -131,21 +131,18 @@ async def log_requests(request: Request, call_next):
 
 def _score_transaction(tx_dict: dict, include_explanation: bool = False) -> FraudScoreResponse:
     """Core scoring logic shared by single and batch endpoints."""
-    from app.core.features import build_features, get_feature_columns
+    from app.utils.inference_utils import build_inference_features
     from app.agent.explainer import get_explainer
 
     model = _get_model()
     t0 = time.perf_counter()
 
-    # Build features
-    df = pd.DataFrame([tx_dict])
-    df = build_features(df, fast=False)
-    feat_cols = get_feature_columns(df)
+    # Build features — zero-pads missing columns to match training dimension
+    from app.utils.inference_utils import build_inference_features
+    X, feat_cols = build_inference_features(tx_dict, settings.model_path)
 
-    if not feat_cols:
+    if X.shape[1] == 0:
         raise HTTPException(status_code=422, detail="No valid feature columns found in transaction.")
-
-    X = df[feat_cols].fillna(0).values
 
     # Score
     fraud_score = float(model.predict_proba(X)[0])

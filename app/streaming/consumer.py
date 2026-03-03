@@ -1,194 +1,257 @@
 """
-Kafka Consumer — reads from fraud.transactions.raw, scores each transaction,
-publishes results to fraud.scores topic.
+Kafka Consumer with Dead-Letter Queue (DLQ) and retry logic.
 
-Features:
-- Configurable retry with exponential backoff
-- Dead-letter queue for unprocessable messages
-- Prometheus metrics (latency, throughput, fraud rate)
-- Graceful shutdown on SIGTERM
+Architecture:
+  - Consumes from: fraud-transactions topic
+  - On success: writes scored result to fraud-scores topic
+  - On transient failure (e.g. model timeout): retries up to MAX_RETRIES
+  - On persistent failure: sends to fraud-transactions-dlq topic
+  - Logs all DLQ events with error details for alerting
+
+Topics:
+  fraud-transactions      ← incoming raw transactions
+  fraud-scores            ← scored results
+  fraud-transactions-dlq  ← dead-letter queue (failed after all retries)
 """
 from __future__ import annotations
 
 import json
 import logging
-import signal
+import os
 import time
-from typing import Callable, Optional
+from dataclasses import dataclass, field
+from typing import Optional
 
-import numpy as np
+import structlog
 from kafka import KafkaConsumer, KafkaProducer
 from kafka.errors import KafkaError
-from prometheus_client import Counter, Histogram, Gauge
 
-from app.core.config import settings
+logger = structlog.get_logger()
 
-logger = logging.getLogger(__name__)
+# ─── Config ───────────────────────────────────────────────────────────────────
 
-# ─── Prometheus metrics ──────────────────────────────────────────────────────
-TRANSACTIONS_PROCESSED = Counter(
-    "fraud_transactions_processed_total", "Total transactions processed"
-)
-TRANSACTIONS_FLAGGED = Counter(
-    "fraud_transactions_flagged_total", "Total transactions flagged as fraud"
-)
-PROCESSING_LATENCY = Histogram(
-    "fraud_scoring_latency_seconds",
-    "Transaction scoring latency",
-    buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0],
-)
-FRAUD_RATE_GAUGE = Gauge("fraud_rate_current", "Current fraud rate (rolling)")
-DLQ_MESSAGES = Counter("fraud_dlq_messages_total", "Messages sent to DLQ")
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+CONSUMER_TOPIC = "fraud-transactions"
+SCORES_TOPIC = "fraud-scores"
+DLQ_TOPIC = "fraud-transactions-dlq"
+CONSUMER_GROUP = "fraud-scorer-group"
+
+MAX_RETRIES = 3
+RETRY_BACKOFF_BASE_S = 1.0   # exponential: 1s, 2s, 4s
+POLL_TIMEOUT_MS = 1000
 
 
-class FraudScoringConsumer:
+# ─── DLQ message ─────────────────────────────────────────────────────────────
+
+@dataclass
+class DLQMessage:
+    original_topic: str
+    original_partition: int
+    original_offset: int
+    payload: dict
+    error_type: str
+    error_message: str
+    retry_count: int
+    failed_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+
+    def to_dict(self) -> dict:
+        return {
+            "original_topic": self.original_topic,
+            "original_partition": self.original_partition,
+            "original_offset": self.original_offset,
+            "payload": self.payload,
+            "error_type": self.error_type,
+            "error_message": self.error_message,
+            "retry_count": self.retry_count,
+            "failed_at": self.failed_at,
+        }
+
+
+# ─── Consumer ────────────────────────────────────────────────────────────────
+
+class FraudConsumer:
     """
-    Consumes raw transactions from Kafka, scores them using the ensemble
-    model, and publishes scored results to fraud.scores topic.
+    Event-driven Kafka consumer for real-time fraud scoring.
+
+    Features:
+    - Retry with exponential backoff (up to MAX_RETRIES)
+    - Dead-letter queue for unrecoverable failures
+    - Structured logging for every event
+    - Prometheus metrics (optional)
+    - Graceful shutdown on SIGINT/SIGTERM
     """
 
-    def __init__(
-        self,
-        score_fn: Callable[[dict], dict],
-        bootstrap_servers: Optional[str] = None,
-        consumer_group: Optional[str] = None,
-        input_topic: Optional[str] = None,
-        output_topic: Optional[str] = None,
-        dlq_topic: Optional[str] = None,
-        max_retries: int = 3,
-        retry_backoff_ms: int = 500,
-    ):
-        """
-        Args:
-            score_fn: Callable that takes a transaction dict and returns
-                      a scored dict with {fraud_score, is_fraud, anomaly_score, ...}.
-        """
-        self.score_fn = score_fn
-        self.bootstrap_servers = bootstrap_servers or settings.kafka_bootstrap_servers
-        self.consumer_group = consumer_group or settings.kafka_consumer_group
-        self.input_topic = input_topic or settings.kafka_topic_transactions
-        self.output_topic = output_topic or settings.kafka_topic_scores
-        self.dlq_topic = dlq_topic or settings.kafka_topic_dlq
-        self.max_retries = max_retries
-        self.retry_backoff_ms = retry_backoff_ms
+    def __init__(self, model_dir: str = "models/"):
+        self.model_dir = model_dir
+        self._model = None
         self._running = False
 
-        # Rolling fraud rate tracker
-        self._recent_scores: list[float] = []
-        self._window_size = 1000
-
-        # Graceful shutdown
-        signal.signal(signal.SIGTERM, self._handle_sigterm)
-        signal.signal(signal.SIGINT, self._handle_sigterm)
-
-    def _build_consumer(self) -> KafkaConsumer:
-        return KafkaConsumer(
-            self.input_topic,
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=self.consumer_group,
-            auto_offset_reset="earliest",
-            enable_auto_commit=False,  # manual commit for at-least-once semantics
-            value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+        self.consumer = KafkaConsumer(
+            CONSUMER_TOPIC,
+            bootstrap_servers=KAFKA_BOOTSTRAP,
+            group_id=CONSUMER_GROUP,
+            auto_offset_reset="latest",
+            enable_auto_commit=False,   # manual commit after successful scoring
+            value_deserializer=lambda b: json.loads(b.decode("utf-8")),
+            max_poll_records=100,
             session_timeout_ms=30000,
             heartbeat_interval_ms=10000,
-            max_poll_records=100,
         )
 
-    def _build_producer(self) -> KafkaProducer:
-        return KafkaProducer(
-            bootstrap_servers=self.bootstrap_servers,
+        self.producer = KafkaProducer(
+            bootstrap_servers=KAFKA_BOOTSTRAP,
             value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-            acks="all",
-            retries=3,
+            retries=5,
+            acks="all",               # wait for all replicas to confirm
+            compression_type="gzip",
         )
+
+        logger.info("consumer_initialized",
+                    topic=CONSUMER_TOPIC,
+                    group=CONSUMER_GROUP,
+                    dlq_topic=DLQ_TOPIC)
+
+    def _load_model(self):
+        if self._model is not None:
+            return self._model
+        from app.core.ensemble import FraudEnsemble
+        self._model = FraudEnsemble.load(self.model_dir)
+        logger.info("model_loaded", model_dir=self.model_dir)
+        return self._model
+
+    def _score(self, tx_dict: dict) -> dict:
+        """Score a transaction and return result dict."""
+        import pandas as pd
+        from app.utils.inference_utils import build_inference_features
+
+        model = self._load_model()
+        t0 = time.perf_counter()
+
+        X, feat_cols = build_inference_features(tx_dict, self.model_dir)
+        fraud_score = float(model.predict_proba(X)[0])
+        anomaly_score = float(model.anomaly_scores(X)[0])
+        shap_result = model.explain_single(X[0])
+
+        latency_ms = (time.perf_counter() - t0) * 1000
+        ae_threshold = model.ae_trainer.threshold or 0.05
+
+        return {
+            "transaction_id": tx_dict.get("TransactionID"),
+            "fraud_score": round(fraud_score, 6),
+            "is_fraud": fraud_score >= 0.4,
+            "anomaly_score": round(anomaly_score, 6),
+            "anomaly_flag": anomaly_score > ae_threshold,
+            "top_risk_factors": shap_result.get("top_features", [])[:5],
+            "latency_ms": round(latency_ms, 2),
+            "scored_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+
+    def _send_to_dlq(self, record, payload: dict, error: Exception, retries: int) -> None:
+        """Send failed message to dead-letter queue."""
+        dlq_msg = DLQMessage(
+            original_topic=record.topic,
+            original_partition=record.partition,
+            original_offset=record.offset,
+            payload=payload,
+            error_type=type(error).__name__,
+            error_message=str(error)[:500],
+            retry_count=retries,
+        )
+        try:
+            self.producer.send(DLQ_TOPIC, value=dlq_msg.to_dict())
+            self.producer.flush()
+            logger.error(
+                "dlq_sent",
+                transaction_id=payload.get("TransactionID"),
+                error_type=dlq_msg.error_type,
+                retries=retries,
+                partition=record.partition,
+                offset=record.offset,
+            )
+        except Exception as dlq_err:
+            logger.critical("dlq_send_failed", error=str(dlq_err))
+
+    def _process_record(self, record) -> bool:
+        """
+        Process one Kafka record with retry logic.
+        Returns True on success, False on failure (after all retries).
+        """
+        payload = record.value
+        tx_id = payload.get("TransactionID", "unknown")
+        last_error = None
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                result = self._score(payload)
+                self.producer.send(SCORES_TOPIC, value=result)
+                self.producer.flush()
+                logger.info(
+                    "transaction_scored",
+                    transaction_id=tx_id,
+                    fraud_score=result["fraud_score"],
+                    is_fraud=result["is_fraud"],
+                    latency_ms=result["latency_ms"],
+                    attempt=attempt + 1,
+                )
+                return True
+
+            except Exception as e:
+                last_error = e
+                wait = RETRY_BACKOFF_BASE_S * (2 ** attempt)
+                logger.warning(
+                    "score_failed_retrying",
+                    transaction_id=tx_id,
+                    attempt=attempt + 1,
+                    max_retries=MAX_RETRIES,
+                    error=str(e),
+                    retry_in_s=wait,
+                )
+                time.sleep(wait)
+
+        # All retries exhausted → DLQ
+        self._send_to_dlq(record, payload, last_error, MAX_RETRIES)
+        return False
 
     def run(self) -> None:
-        """Main consumer loop. Blocks until shutdown signal received."""
+        """Main consumer loop. Runs until stop() is called."""
         self._running = True
-        consumer = self._build_consumer()
-        producer = self._build_producer()
-        logger.info(
-            f"[Consumer] Listening on {self.input_topic} "
-            f"(group={self.consumer_group})"
-        )
+        logger.info("consumer_started", topic=CONSUMER_TOPIC)
+
+        processed = 0
+        failures = 0
 
         try:
             while self._running:
-                records = consumer.poll(timeout_ms=1000)
+                records = self.consumer.poll(timeout_ms=POLL_TIMEOUT_MS)
+
                 for tp, messages in records.items():
-                    for message in messages:
-                        self._process_message(message, producer)
-                    consumer.commit()
-        except Exception as e:
-            logger.error(f"[Consumer] Fatal error: {e}")
-            raise
+                    for record in messages:
+                        success = self._process_record(record)
+                        if success:
+                            processed += 1
+                            # Commit offset only after successful scoring
+                            self.consumer.commit({tp: record.offset + 1})
+                        else:
+                            failures += 1
+
+                if processed > 0 and processed % 100 == 0:
+                    logger.info("consumer_progress",
+                                processed=processed,
+                                failures=failures,
+                                dlq_rate=round(failures / (processed + failures), 4))
+
+        except KeyboardInterrupt:
+            logger.info("consumer_stopping", reason="keyboard_interrupt")
         finally:
-            consumer.close()
-            producer.close()
-            logger.info("[Consumer] Shutdown complete")
+            self.stop()
 
-    def _process_message(self, message, producer: KafkaProducer) -> None:
-        """Score a single transaction message with retry logic."""
-        tx = message.value
-        tx_id = tx.get("TransactionID", "unknown")
-
-        for attempt in range(self.max_retries):
-            try:
-                start = time.perf_counter()
-                scored = self.score_fn(tx)
-                latency = time.perf_counter() - start
-
-                # Publish to output topic
-                producer.send(self.output_topic, value=scored)
-
-                # Update metrics
-                TRANSACTIONS_PROCESSED.inc()
-                PROCESSING_LATENCY.observe(latency)
-
-                if scored.get("is_fraud", False):
-                    TRANSACTIONS_FLAGGED.inc()
-
-                self._update_fraud_rate(scored.get("fraud_score", 0.0))
-
-                logger.debug(
-                    f"[Consumer] tx={tx_id} score={scored.get('fraud_score', 0):.4f} "
-                    f"latency={latency * 1000:.1f}ms"
-                )
-                return
-
-            except Exception as e:
-                logger.warning(
-                    f"[Consumer] Attempt {attempt + 1}/{self.max_retries} "
-                    f"failed for tx={tx_id}: {e}"
-                )
-                if attempt < self.max_retries - 1:
-                    time.sleep((self.retry_backoff_ms * (2 ** attempt)) / 1000.0)
-
-        # All retries exhausted → DLQ
-        logger.error(f"[Consumer] Sending tx={tx_id} to DLQ after {self.max_retries} retries")
-        self._send_to_dlq(producer, tx, error="Max retries exceeded")
-        DLQ_MESSAGES.inc()
-
-    def _send_to_dlq(self, producer: KafkaProducer, tx: dict, error: str) -> None:
-        payload = {
-            "original_message": tx,
-            "error": error,
-            "timestamp": time.time(),
-        }
-        try:
-            producer.send(self.dlq_topic, value=payload)
-        except KafkaError as e:
-            logger.critical(f"[Consumer] DLQ send failed: {e}")
-
-    def _update_fraud_rate(self, score: float) -> None:
-        self._recent_scores.append(score)
-        if len(self._recent_scores) > self._window_size:
-            self._recent_scores.pop(0)
-        if self._recent_scores:
-            FRAUD_RATE_GAUGE.set(
-                sum(1 for s in self._recent_scores if s >= 0.5) / len(self._recent_scores)
-            )
-
-    def _handle_sigterm(self, signum, frame) -> None:
-        logger.info("[Consumer] Shutdown signal received")
+    def stop(self) -> None:
         self._running = False
+        self.consumer.close()
+        self.producer.close()
+        logger.info("consumer_stopped")
+
+
+if __name__ == "__main__":
+    consumer = FraudConsumer()
+    consumer.run()

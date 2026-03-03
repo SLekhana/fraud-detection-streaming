@@ -1,0 +1,248 @@
+{
+  "global": [
+    {
+      "feature": "C5",
+      "mean_abs_shap": 0.3262653946876526
+    },
+    {
+      "feature": "C13",
+      "mean_abs_shap": 0.299861878156662
+    },
+    {
+      "feature": "C1",
+      "mean_abs_shap": 0.2911294996738434
+    },
+    {
+      "feature": "C14",
+      "mean_abs_shap": 0.23992298543453217
+    },
+    {
+      "feature": "card_avg_amt",
+      "mean_abs_shap": 0.22958357632160187
+    },
+    {
+      "feature": "D3",
+      "mean_abs_shap": 0.2043251097202301
+    },
+    {
+      "feature": "D4",
+      "mean_abs_shap": 0.17080965638160706
+    },
+    {
+      "feature": "TransactionAmt",
+      "mean_abs_shap": 0.1620142161846161
+    },
+    {
+      "feature": "card_tx_count",
+      "mean_abs_shap": 0.16058965027332306
+    },
+    {
+      "feature": "D1",
+      "mean_abs_shap": 0.15290899574756622
+    },
+    {
+      "feature": "C2",
+      "mean_abs_shap": 0.1443202793598175
+    },
+    {
+      "feature": "C6",
+      "mean_abs_shap": 0.13118961453437805
+    },
+    {
+      "feature": "C8",
+      "mean_abs_shap": 0.1302083432674408
+    },
+    {
+      "feature": "C11",
+      "mean_abs_shap": 0.12943515181541443
+    },
+    {
+      "feature": "card_std_amt",
+      "mean_abs_shap": 0.12231452018022537
+    },
+    {
+      "feature": "amt_cents",
+      "mean_abs_shap": 0.11156456172466278
+    },
+    {
+      "feature": "C9",
+      "mean_abs_shap": 0.10876768827438354
+    },
+    {
+      "feature": "C4",
+      "mean_abs_shap": 0.10712934285402298
+    },
+    {
+      "feature": "D2",
+      "mean_abs_shap": 0.10693977773189545
+    },
+    {
+      "feature": "velocity_count_1h",
+      "mean_abs_shap": 0.09951931983232498
+    },
+    {
+      "feature": "merchant_fraud_rate",
+      "mean_abs_shap": 0.09722045809030533
+    },
+    {
+      "feature": "ae_emb_0",
+      "mean_abs_shap": 0.08876952528953552
+    },
+    {
+      "feature": "velocity_std_1h",
+      "mean_abs_shap": 0.08105926960706711
+    },
+    {
+      "feature": "addr_distance_km",
+      "mean_abs_shap": 0.07555416226387024
+    },
+    {
+      "feature": "tx_hour",
+      "mean_abs_shap": 0.0752391591668129
+    },
+    {
+      "feature": "C12",
+      "mean_abs_shap": 0.0745648592710495
+    },
+    {
+      "feature": "ae_anomaly_score",
+      "mean_abs_shap": 0.07165654003620148
+    },
+    {
+      "feature": "merchant_tx_count",
+      "mean_abs_shap": 0.06607921421527863
+    },
+    {
+      "feature": "dist1",
+      "mean_abs_shap": 0.06384880840778351
+    },
+    {
+      "feature": "ae_emb_6",
+      "mean_abs_shap": 0.06343307346105576
+    }
+  ],
+  "fraud": [
+    {
+      "feature": "C1",
+      "shap": 0.6075242161750793
+    },
+    {
+      "feature": "C14",
+      "shap": 0.3899780511856079
+    },
+    {
+      "feature": "C13",
+      "shap": 0.3664694130420685
+    },
+    {
+      "feature": "card_avg_amt",
+      "shap": 0.2881888747215271
+    },
+    {
+      "feature": "C8",
+      "shap": 0.23294880986213684
+    },
+    {
+      "feature": "C5",
+      "shap": 0.19828663766384125
+    },
+    {
+      "feature": "TransactionAmt",
+      "shap": 0.18733763694763184
+    },
+    {
+      "feature": "C11",
+      "shap": 0.17699003219604492
+    },
+    {
+      "feature": "merchant_fraud_rate",
+      "shap": 0.152982696890831
+    },
+    {
+      "feature": "C2",
+      "shap": 0.1526707112789154
+    },
+    {
+      "feature": "card_std_amt",
+      "shap": 0.1473819613456726
+    },
+    {
+      "feature": "C4",
+      "shap": 0.14670662581920624
+    },
+    {
+      "feature": "C12",
+      "shap": 0.14205050468444824
+    },
+    {
+      "feature": "card_tx_count",
+      "shap": 0.13996677100658417
+    },
+    {
+      "feature": "C6",
+      "shap": 0.13819311559200287
+    }
+  ],
+  "legit": [
+    {
+      "feature": "C5",
+      "shap": 0.3307013511657715
+    },
+    {
+      "feature": "C13",
+      "shap": 0.29755327105522156
+    },
+    {
+      "feature": "C1",
+      "shap": 0.28016287088394165
+    },
+    {
+      "feature": "C14",
+      "shap": 0.23472188413143158
+    },
+    {
+      "feature": "card_avg_amt",
+      "shap": 0.22755219042301178
+    },
+    {
+      "feature": "D3",
+      "shap": 0.20710214972496033
+    },
+    {
+      "feature": "D4",
+      "shap": 0.17200243473052979
+    },
+    {
+      "feature": "card_tx_count",
+      "shap": 0.1613045185804367
+    },
+    {
+      "feature": "TransactionAmt",
+      "shap": 0.16113640367984772
+    },
+    {
+      "feature": "D1",
+      "shap": 0.15352705121040344
+    },
+    {
+      "feature": "C2",
+      "shap": 0.14403079450130463
+    },
+    {
+      "feature": "C6",
+      "shap": 0.13094691932201385
+    },
+    {
+      "feature": "C11",
+      "shap": 0.12778685986995697
+    },
+    {
+      "feature": "C8",
+      "shap": 0.1266472041606903
+    },
+    {
+      "feature": "card_std_amt",
+      "shap": 0.12144570797681808
+    }
+  ]
+}

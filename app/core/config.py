@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # Model paths
-    model_path: str = "models/v2/"
+    model_path: str = "models/v3/"
     autoencoder_path: str = "models/autoencoder.pt"
     xgboost_path: str = "models/xgboost.json"
     threshold_autoencoder: float = 0.05

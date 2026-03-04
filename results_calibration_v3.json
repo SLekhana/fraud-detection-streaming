@@ -1,0 +1,18 @@
+{
+  "method": "platt",
+  "before": {
+    "precision": 0.2199,
+    "recall": 0.8073,
+    "f1": 0.3456,
+    "auc_pr": 0.5858,
+    "auc_roc": 0.9277
+  },
+  "after": {
+    "precision": 0.7786,
+    "recall": 0.4056,
+    "f1": 0.5334,
+    "auc_pr": 0.5858,
+    "auc_roc": 0.9277
+  },
+  "note": "Calibrator fitted on 47,243 samples (40% of test set), metrics reported on separate 70,865-sample eval split (60%)."
+}

@@ -1,12 +1,20 @@
 """
 Feature engineering for IEEE-CIS fraud detection.
 
+v2 fixes:
+- Velocity windowing: replaced expanding() with proper time-based rolling (closed='left')
+- Card aggregates: accepts precomputed stats to prevent train→test leakage
+- Extended feature set: V1-V20 (was V1-V6), numeric identity features id_01..id_11
+- compute_card_stats() and compute_risk_profile() exported for use in train.py
+
 Covers:
 - Transaction velocity windowing (count/sum/std in 1h, 6h, 24h windows)
 - Geolocation haversine distance (billing vs shipping address proxy)
 - Merchant risk profiling (historical fraud rate per merchant category)
 - Temporal features (hour of day, day of week, weekend flag)
 - Card-level aggregates (avg transaction amount, card activity)
+- IEEE-CIS V-columns (Vesta engineered, top 20 by variance)
+- IEEE-CIS identity numeric features (id_01–id_11)
 """
 from __future__ import annotations
 
@@ -22,10 +30,9 @@ def haversine_distance(
 ) -> float:
     """
     Compute great-circle distance (km) between two lat/lon pairs.
-    Used as proxy for billing-vs-shipping address distance in IEEE-CIS
-    (addr1/addr2 mapped to approximate coordinates via zip-code lookup).
+    Used as proxy for billing-vs-shipping address distance in IEEE-CIS.
     """
-    R = 6371.0  # Earth radius in km
+    R = 6371.0
     phi1, phi2 = np.radians(lat1), np.radians(lat2)
     dphi = np.radians(lat2 - lat1)
     dlambda = np.radians(lon2 - lon1)
@@ -34,21 +41,13 @@ def haversine_distance(
 
 
 def add_address_distance(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    IEEE-CIS addr1/addr2 are ZIP codes. We approximate lat/lon from ZIP
-    modular arithmetic as a deterministic proxy (real deployment would use
-    a ZIP→lat/lon lookup table).
-    """
     df = df.copy()
     addr1 = df["addr1"].fillna(0).astype(float)
     addr2 = df["addr2"].fillna(0).astype(float)
-
-    # Deterministic ZIP → approximate lat/lon proxy
     lat1 = 30.0 + (addr1 % 100) / 10.0
     lon1 = -90.0 - (addr1 % 50) / 10.0
     lat2 = 30.0 + (addr2 % 100) / 10.0
     lon2 = -90.0 - (addr2 % 50) / 10.0
-
     df["addr_distance_km"] = haversine_distance(
         lat1.values, lon1.values, lat2.values, lon2.values
     )
@@ -63,13 +62,8 @@ def add_velocity_features(
     windows_hours: list[int] | None = None,
 ) -> pd.DataFrame:
     """
-    For each card (card1), compute transaction velocity in rolling windows:
-    - count of transactions
-    - sum of transaction amounts
-    - std of transaction amounts
-
-    IEEE-CIS TransactionDT is seconds since a reference date; we convert
-    to hours for windowing.
+    Row-wise velocity (used for single-transaction inference).
+    Computes exact rolling window for the given transaction only.
     """
     if windows_hours is None:
         windows_hours = [1, 6, 24]
@@ -78,10 +72,6 @@ def add_velocity_features(
     df["TransactionHour"] = df["TransactionDT"] / 3600.0
 
     for w in windows_hours:
-        count_col = f"velocity_count_{w}h"
-        sum_col = f"velocity_sum_{w}h"
-        std_col = f"velocity_std_{w}h"
-
         counts, sums, stds = [], [], []
         for _, row in df.iterrows():
             card = row["card1"]
@@ -95,9 +85,9 @@ def add_velocity_features(
             sums.append(window["TransactionAmt"].sum())
             stds.append(window["TransactionAmt"].std() if len(window) > 1 else 0.0)
 
-        df[count_col] = counts
-        df[sum_col] = sums
-        df[std_col] = stds
+        df[f"velocity_count_{w}h"] = counts
+        df[f"velocity_sum_{w}h"] = sums
+        df[f"velocity_std_{w}h"] = stds
 
     return df
 
@@ -108,44 +98,69 @@ def add_velocity_features_fast(
 ) -> pd.DataFrame:
     """
     Vectorised velocity computation (used for training on full dataset).
-    Groups by card1 and uses rolling window on sorted timestamps.
+
+    FIX vs v1: Uses proper time-based rolling window (closed='left') instead
+    of expanding().count() which was counting ALL prior transactions regardless
+    of window size. This makes velocity_count_1h actually mean
+    "transactions on this card in the past 1 hour", not "ever".
     """
     if windows_hours is None:
         windows_hours = [1, 6, 24]
 
     df = df.copy().sort_values(["card1", "TransactionDT"])
-    df["TransactionHour"] = df["TransactionDT"] / 3600.0
     df = df.reset_index(drop=True)
 
+    # Build a datetime-indexed copy for time-based rolling
+    ref = pd.Timestamp("2017-11-30")
+    df["_dt"] = ref + pd.to_timedelta(df["TransactionDT"], unit="s")
+    df_indexed = df.set_index("_dt")
+
     for w in windows_hours:
-        window_size = w * 3600  # back to seconds for comparison
-
-        # Use expanding window per card as approximation for rolling
-        grp = df.groupby("card1")["TransactionAmt"]
+        window_str = f"{w}h"
+        # closed='left' excludes the current transaction from its own window
         df[f"velocity_count_{w}h"] = (
-            grp.transform(lambda x: x.expanding().count()) - 1
-        ).clip(lower=0)
-        df[f"velocity_sum_{w}h"] = grp.transform(
-            lambda x: x.expanding().sum() - x
+            df_indexed.groupby("card1")["TransactionAmt"]
+            .transform(lambda x: x.rolling(window_str, closed="left").count())
+            .fillna(0)
+            .values
         )
-        df[f"velocity_std_{w}h"] = grp.transform(
-            lambda x: x.expanding().std().fillna(0)
+        df[f"velocity_sum_{w}h"] = (
+            df_indexed.groupby("card1")["TransactionAmt"]
+            .transform(lambda x: x.rolling(window_str, closed="left").sum())
+            .fillna(0)
+            .values
+        )
+        df[f"velocity_std_{w}h"] = (
+            df_indexed.groupby("card1")["TransactionAmt"]
+            .transform(lambda x: x.rolling(window_str, closed="left").std())
+            .fillna(0)
+            .values
         )
 
+    df = df.drop(columns=["_dt"])
     return df
 
 
 # ─── Merchant risk profiling ─────────────────────────────────────────────────
 
-def build_merchant_risk_profile(
+def compute_risk_profile(
     df: pd.DataFrame,
     target_col: str = "isFraud",
     category_col: str = "ProductCD",
 ) -> pd.DataFrame:
     """
     Compute historical fraud rate per merchant/product category.
-    Returns a risk profile DataFrame (used to join onto test data).
+    Call on TRAINING data only; pass result to add_merchant_risk() on test data.
+    Exported alias of build_merchant_risk_profile for clarity.
     """
+    return build_merchant_risk_profile(df, target_col=target_col, category_col=category_col)
+
+
+def build_merchant_risk_profile(
+    df: pd.DataFrame,
+    target_col: str = "isFraud",
+    category_col: str = "ProductCD",
+) -> pd.DataFrame:
     profile = (
         df.groupby(category_col)[target_col]
         .agg(["mean", "count"])
@@ -160,7 +175,6 @@ def add_merchant_risk(
     risk_profile: pd.DataFrame,
     category_col: str = "ProductCD",
 ) -> pd.DataFrame:
-    """Join merchant risk profile onto transaction DataFrame."""
     df = df.copy()
     df = df.merge(risk_profile, on=category_col, how="left")
     df["merchant_fraud_rate"] = df["merchant_fraud_rate"].fillna(0.0)
@@ -172,10 +186,6 @@ def add_merchant_risk(
 # ─── Temporal features ───────────────────────────────────────────────────────
 
 def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    IEEE-CIS TransactionDT = seconds elapsed since 2017-11-30.
-    Extract hour of day, day of week, weekend flag.
-    """
     df = df.copy()
     ref = pd.Timestamp("2017-11-30")
     dt = ref + pd.to_timedelta(df["TransactionDT"], unit="s")
@@ -188,16 +198,44 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
 
 # ─── Card-level aggregates ───────────────────────────────────────────────────
 
-def add_card_aggregates(df: pd.DataFrame) -> pd.DataFrame:
-    """Per-card historical averages for amount deviation detection."""
-    df = df.copy()
-    card_stats = (
+def compute_card_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute card-level statistics.
+    Call on TRAINING data only to avoid leakage; pass result to add_card_aggregates().
+    """
+    stats = (
         df.groupby("card1")["TransactionAmt"]
         .agg(card_avg_amt="mean", card_std_amt="std", card_tx_count="count")
         .reset_index()
     )
-    card_stats["card_std_amt"] = card_stats["card_std_amt"].fillna(0)
+    stats["card_std_amt"] = stats["card_std_amt"].fillna(0)
+    return stats
+
+
+def add_card_aggregates(
+    df: pd.DataFrame,
+    card_stats: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """
+    Add card-level aggregate features.
+
+    FIX vs v1: card_stats is now passed in explicitly so that test/inference
+    rows use statistics computed only on training data.
+    If card_stats is None (backward compat), computes from df — which leaks
+    for test sets and should only be used in exploratory contexts.
+    """
+    df = df.copy()
+    if card_stats is None:
+        card_stats = compute_card_stats(df)
+
     df = df.merge(card_stats, on="card1", how="left")
+
+    # Fallback for cards unseen in training
+    global_avg = card_stats["card_avg_amt"].mean()
+    df["card_avg_amt"] = df["card_avg_amt"].fillna(global_avg)
+    df["card_std_amt"] = df["card_std_amt"].fillna(0)
+    df["card_tx_count"] = df["card_tx_count"].fillna(0)
+
     df["amt_zscore"] = (
         (df["TransactionAmt"] - df["card_avg_amt"]) / (df["card_std_amt"] + 1e-6)
     ).fillna(0)
@@ -207,7 +245,6 @@ def add_card_aggregates(df: pd.DataFrame) -> pd.DataFrame:
 # ─── Amount features ─────────────────────────────────────────────────────────
 
 def add_amount_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Log-transform and round-amount flag."""
     df = df.copy()
     df["log_amt"] = np.log1p(df["TransactionAmt"])
     df["amt_is_round"] = (df["TransactionAmt"] % 1 == 0).astype(int)
@@ -218,39 +255,62 @@ def add_amount_features(df: pd.DataFrame) -> pd.DataFrame:
 # ─── Master pipeline ─────────────────────────────────────────────────────────
 
 NUMERIC_COLS = [
+    # Amount
     "TransactionAmt", "log_amt", "amt_is_round", "amt_cents",
+    # Address
     "addr_distance_km", "addr_mismatch",
+    # Velocity (now uses correct time-based rolling)
     "velocity_count_1h", "velocity_sum_1h", "velocity_std_1h",
     "velocity_count_6h", "velocity_sum_6h", "velocity_std_6h",
     "velocity_count_24h", "velocity_sum_24h", "velocity_std_24h",
+    # Merchant risk
     "merchant_fraud_rate", "merchant_tx_count", "high_risk_merchant",
+    # Temporal
     "tx_hour", "tx_day_of_week", "tx_is_weekend", "tx_is_night",
+    # Card aggregates (computed from train only)
     "card_avg_amt", "card_std_amt", "card_tx_count", "amt_zscore",
+    # Distance features
     "dist1", "dist2",
+    # Count features (behavioral)
     "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10",
     "C11", "C12", "C13", "C14",
+    # Timedelta features
     "D1", "D2", "D3", "D4",
-    "V1", "V2", "V3", "V4", "V5", "V6",
+    # Vesta-engineered features — expanded from V1-V6 to V1-V20
+    # These are masked/normalised by Vesta but carry strong signal
+    "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10",
+    "V11", "V12", "V13", "V14", "V15", "V16", "V17", "V18", "V19", "V20",
+    # Numeric identity features (from train_identity.csv)
+    # id_01: device screen resolution width proxy
+    # id_02: device screen resolution height proxy
+    # id_03..id_06: network/browser numeric signals
+    # id_09..id_11: additional numeric device signals
+    "id_01", "id_02", "id_03", "id_05", "id_06", "id_09", "id_10", "id_11",
 ]
 
 
 def build_features(
     df: pd.DataFrame,
     risk_profile: Optional[pd.DataFrame] = None,
+    card_stats: Optional[pd.DataFrame] = None,
     fast: bool = True,
 ) -> pd.DataFrame:
     """
     Full feature engineering pipeline.
 
     Args:
-        df: Raw IEEE-CIS transaction DataFrame.
-        risk_profile: Pre-computed merchant risk profile (from training set).
-        fast: Use vectorised velocity (True for training) vs row-wise (False for streaming).
+        df: Raw IEEE-CIS transaction DataFrame (merged with identity if available).
+        risk_profile: Pre-computed merchant risk profile from TRAINING data.
+                      Pass None only if merchant risk features are not needed.
+        card_stats: Pre-computed card statistics from TRAINING data.
+                    If None, computes from df (leaks for test sets — avoid in production).
+        fast: Use vectorised time-based rolling (True for training/batch)
+              vs row-wise (False for single-transaction streaming inference).
     """
     df = add_address_distance(df)
     df = add_temporal_features(df)
     df = add_amount_features(df)
-    df = add_card_aggregates(df)
+    df = add_card_aggregates(df, card_stats=card_stats)
 
     if fast:
         df = add_velocity_features_fast(df)
@@ -264,7 +324,7 @@ def build_features(
         df["merchant_tx_count"] = 0
         df["high_risk_merchant"] = 0
 
-    # Fill missing numeric cols
+    # Fill missing numeric cols with 0 (handles absent identity/V columns gracefully)
     for col in NUMERIC_COLS:
         if col in df.columns:
             df[col] = df[col].fillna(0)

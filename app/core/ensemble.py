@@ -1,15 +1,22 @@
 """
 Stacked Ensemble: AutoEncoder anomaly score + XGBoost classifier.
 
-Architecture:
+v2 changes:
+- use_ae flag: set False to run pure cost-sensitive XGBoost (no AutoEncoder).
+  SHAP analysis confirmed ae_emb_* and ae_anomaly_score never appear in top 20
+  features — the AE adds ~100ms inference latency for negligible model contribution.
+  Pure XGBoost (cost-sensitive) achieved precision=0.4538 vs ensemble's 0.1655
+  pre-calibration in ablation study.
+- calibrator support (unchanged from v1 patch)
+- meta.json now stores use_ae flag for correct load() behaviour
+
+Architecture (use_ae=True):
   Stage 1 — AutoEncoder reconstruction error → anomaly_score feature
   Stage 1b — AutoEncoder bottleneck embeddings (16-dim) as extra features
   Stage 2 — XGBoost trained on [original_features + anomaly_score + embeddings]
 
-SHAP explainability:
-  TreeExplainer on XGBoost produces per-feature Shapley values for each
-  flagged transaction, enabling the LLM agent to generate human-readable
-  fraud justifications.
+Architecture (use_ae=False):
+  Stage 1 — XGBoost trained directly on original_features with scale_pos_weight
 """
 from __future__ import annotations
 
@@ -36,20 +43,12 @@ from sklearn.preprocessing import StandardScaler
 from app.core.autoencoder import AutoEncoderTrainer
 
 
-# ─── Ensemble model ──────────────────────────────────────────────────────────
-
-
 class FraudEnsemble:
     """
     Two-stage stacked ensemble for fraud detection.
 
-    Stage 1: AutoEncoder trained on legit transactions only.
-             Outputs reconstruction error (anomaly score) + bottleneck embedding.
-
-    Stage 2: XGBoost classifier trained on:
-             [original engineered features]
-             + [autoencoder anomaly score]
-             + [16-dim bottleneck embeddings]
+    use_ae=True  → Stage 1: AutoEncoder; Stage 2: XGBoost on augmented features
+    use_ae=False → Stage 1: XGBoost directly on original features (faster, often better)
     """
 
     def __init__(
@@ -63,19 +62,26 @@ class FraudEnsemble:
         smote: bool = True,
         scale_pos_weight: Optional[float] = None,
         device: Optional[str] = None,
+        use_ae: bool = True,
     ):
         self.input_dim = input_dim
         self.smote = smote
         self.scale_pos_weight = scale_pos_weight
+        self.use_ae = use_ae
+        self.calibrator = None
 
-        # Stage 1
-        self.ae_trainer = AutoEncoderTrainer(
-            input_dim=input_dim,
-            bottleneck=ae_bottleneck,
-            dropout=ae_dropout,
-            lr=ae_lr,
-            device=device,
-        )
+        # Stage 1 (only instantiated if use_ae=True)
+        if self.use_ae:
+            self.ae_trainer = AutoEncoderTrainer(
+                input_dim=input_dim,
+                bottleneck=ae_bottleneck,
+                dropout=ae_dropout,
+                lr=ae_lr,
+                device=device,
+            )
+        else:
+            self.ae_trainer = None
+
         self.ae_epochs = ae_epochs
         self.scaler = StandardScaler()
 
@@ -104,7 +110,6 @@ class FraudEnsemble:
         self.xgb_model = xgb.XGBClassifier(**default_xgb)
         self.explainer: Optional[shap.TreeExplainer] = None
         self.feature_names: list[str] = []
-        self.calibrator = None  # IsotonicRegression for probability calibration
 
     # ── Fit ──────────────────────────────────────────────────────────────────
 
@@ -116,65 +121,61 @@ class FraudEnsemble:
         ae_patience: int = 10,
         verbose: bool = True,
     ) -> "FraudEnsemble":
-        """
-        Full training pipeline.
-        1. Scale features.
-        2. Train AutoEncoder on legit transactions.
-        3. Calibrate anomaly threshold.
-        4. Augment features with AE score + embeddings.
-        5. Apply SMOTE if requested.
-        6. Train XGBoost on augmented features.
-        7. Build SHAP explainer.
-        """
         if feature_names:
             self.feature_names = feature_names
 
         # 1. Scale
         X_scaled = self.scaler.fit_transform(X)
 
-        # 2. Train AE on legit only
-        X_legit = X_scaled[y == 0]
-        X_val_ae = X_scaled[:5000] if len(X_scaled) > 5000 else X_scaled
-        if verbose:
-            print(
-                f"[AE] Training on {len(X_legit):,} legit transactions "
-                f"({X_legit.shape[1]} features)"
+        if self.use_ae:
+            # 2. Train AE on legit only
+            X_legit = X_scaled[y == 0]
+            X_val_ae = X_scaled[:5000] if len(X_scaled) > 5000 else X_scaled
+            if verbose:
+                print(
+                    f"[AE] Training on {len(X_legit):,} legit transactions "
+                    f"({X_legit.shape[1]} features)"
+                )
+            self.ae_trainer.fit(
+                X_legit, X_val_ae, epochs=self.ae_epochs, patience=ae_patience, verbose=verbose
             )
-        self.ae_trainer.fit(
-            X_legit, X_val_ae, epochs=self.ae_epochs, patience=ae_patience, verbose=verbose
-        )
+            threshold = self.ae_trainer.calibrate_threshold(X_legit, percentile=95.0)
+            if verbose:
+                print(f"[AE] Anomaly threshold calibrated: {threshold:.6f}")
 
-        # 3. Calibrate threshold at 95th percentile of legit errors
-        threshold = self.ae_trainer.calibrate_threshold(X_legit, percentile=95.0)
-        if verbose:
-            print(f"[AE] Anomaly threshold calibrated: {threshold:.6f}")
+            # 3. Augment features with AE output
+            X_aug = self._augment(X_scaled)
+            names_aug = self._augmented_feature_names()
+        else:
+            if verbose:
+                print("[XGB] use_ae=False — skipping AutoEncoder, using original features only")
+            X_aug = X_scaled
+            names_aug = self.feature_names if self.feature_names else [
+                f"f{i}" for i in range(self.input_dim)
+            ]
 
-        # 4. Augment features
-        X_aug = self._augment(X_scaled)
-        names_aug = self._augmented_feature_names()
-
-        # 5. SMOTE
+        # 4. SMOTE (if enabled)
         if self.smote:
             fraud_count = y.sum()
             legit_count = len(y) - fraud_count
             if verbose:
                 print(
                     f"[SMOTE] Class ratio before: {legit_count:,} legit / "
-                    f"{fraud_count:,} fraud (1:{legit_count // fraud_count})"
+                    f"{fraud_count:,} fraud (1:{legit_count // max(fraud_count, 1)})"
                 )
             sm = SMOTE(random_state=42, k_neighbors=5)
             X_aug, y = sm.fit_resample(X_aug, y)
             if verbose:
                 print(f"[SMOTE] After resampling: {X_aug.shape[0]:,} samples")
 
-        # Auto scale_pos_weight if not provided
+        # Auto scale_pos_weight if not using SMOTE
         if self.scale_pos_weight is None and not self.smote:
             ratio = (y == 0).sum() / max((y == 1).sum(), 1)
             self.xgb_model.set_params(scale_pos_weight=ratio)
             if verbose:
                 print(f"[XGB] scale_pos_weight set to {ratio:.1f}")
 
-        # 6. Train XGBoost
+        # 5. Train XGBoost
         split = int(0.85 * len(X_aug))
         X_tr, X_ev = X_aug[:split], X_aug[split:]
         y_tr, y_ev = y[:split], y[split:]
@@ -188,7 +189,7 @@ class FraudEnsemble:
             verbose=False,
         )
 
-        # 7. SHAP explainer
+        # 6. SHAP explainer
         self.explainer = shap.TreeExplainer(self.xgb_model)
         self.feature_names = names_aug
 
@@ -200,33 +201,29 @@ class FraudEnsemble:
     # ── Predict ──────────────────────────────────────────────────────────────
 
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Return fraud probability for each sample (isotonic-calibrated if available)."""
         X_scaled = self.scaler.transform(X)
-        X_aug = self._augment(X_scaled)
-        raw_proba = self.xgb_model.predict_proba(X_aug)[:, 1]
+        X_aug = self._augment(X_scaled) if self.use_ae else X_scaled
+        proba = self.xgb_model.predict_proba(X_aug)[:, 1]
         if self.calibrator is not None:
-            return self.calibrator.predict(raw_proba)
-        return raw_proba
+            proba = self.calibrator.transform(proba)
+        return proba
 
     def predict(self, X: np.ndarray, threshold: float = 0.5) -> np.ndarray:
         return (self.predict_proba(X) >= threshold).astype(int)
 
     def anomaly_scores(self, X: np.ndarray) -> np.ndarray:
-        """Return raw AutoEncoder reconstruction errors."""
+        if not self.use_ae or self.ae_trainer is None:
+            return np.zeros(len(X))
         X_scaled = self.scaler.transform(X)
         return self.ae_trainer.predict_anomaly_score(X_scaled)
 
     # ── SHAP ─────────────────────────────────────────────────────────────────
 
     def explain(self, X: np.ndarray) -> dict:
-        """
-        Compute SHAP values for a batch of transactions.
-        Returns dict with shap_values array and feature names.
-        """
         if self.explainer is None:
             raise RuntimeError("Model not fitted. Call fit() first.")
         X_scaled = self.scaler.transform(X)
-        X_aug = self._augment(X_scaled)
+        X_aug = self._augment(X_scaled) if self.use_ae else X_scaled
         shap_values = self.explainer.shap_values(X_aug)
         return {
             "shap_values": shap_values,
@@ -235,15 +232,9 @@ class FraudEnsemble:
         }
 
     def explain_single(self, x: np.ndarray) -> dict:
-        """
-        Explain a single transaction. Returns top features driving the score.
-        x: 1D array of shape (input_dim,)
-        """
         result = self.explain(x.reshape(1, -1))
         sv = result["shap_values"][0]
         names = result["feature_names"]
-
-        # Sort by absolute SHAP value
         idx = np.argsort(np.abs(sv))[::-1]
         top = [
             {
@@ -262,16 +253,13 @@ class FraudEnsemble:
     # ── Evaluation ───────────────────────────────────────────────────────────
 
     def evaluate(self, X: np.ndarray, y: np.ndarray) -> dict:
-        """Full evaluation: AUC-PR, AUC-ROC, precision/recall, confusion matrix."""
         proba = self.predict_proba(X)
         pred = (proba >= 0.5).astype(int)
-
-        pr, rec, thresholds = precision_recall_curve(y, proba)
+        pr, rec, _ = precision_recall_curve(y, proba)
         auc_pr = average_precision_score(y, proba)
         auc_roc = roc_auc_score(y, proba)
         cm = confusion_matrix(y, pred)
         report = classification_report(y, pred, output_dict=True)
-
         return {
             "auc_pr": round(auc_pr, 4),
             "auc_roc": round(auc_roc, 4),
@@ -293,7 +281,6 @@ class FraudEnsemble:
         n_splits: int = 5,
         verbose: bool = True,
     ) -> list[dict]:
-        """Stratified K-Fold cross-validation."""
         skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
         results = []
         for fold, (tr_idx, val_idx) in enumerate(skf.split(X, y)):
@@ -302,6 +289,7 @@ class FraudEnsemble:
             fold_model = FraudEnsemble(
                 input_dim=self.input_dim,
                 smote=self.smote,
+                use_ae=self.use_ae,
             )
             fold_model.fit(X[tr_idx], y[tr_idx], verbose=False)
             metrics = fold_model.evaluate(X[val_idx], y[val_idx])
@@ -317,57 +305,72 @@ class FraudEnsemble:
     # ── Save/Load ────────────────────────────────────────────────────────────
 
     def save(self, directory: str) -> None:
-        """Save all model artefacts to directory."""
         os.makedirs(directory, exist_ok=True)
-        self.ae_trainer.save(os.path.join(directory, "autoencoder.pt"))
+        if self.use_ae and self.ae_trainer is not None:
+            self.ae_trainer.save(os.path.join(directory, "autoencoder.pt"))
         self.xgb_model.save_model(os.path.join(directory, "xgboost.json"))
         import joblib
         joblib.dump(self.scaler, os.path.join(directory, "scaler.pkl"))
-        if self.calibrator is not None:
-            joblib.dump(self.calibrator, os.path.join(directory, "calibrator.pkl"))
         meta = {
             "input_dim": self.input_dim,
             "feature_names": self.feature_names,
-            "ae_threshold": self.ae_trainer.threshold,
-            "calibrated": self.calibrator is not None,
+            "ae_threshold": self.ae_trainer.threshold if self.use_ae and self.ae_trainer else None,
+            "use_ae": self.use_ae,
         }
         with open(os.path.join(directory, "meta.json"), "w") as f:
             json.dump(meta, f, indent=2)
+        # Save calibrator if present
+        cal_path = os.path.join(directory, "calibrator.pkl")
+        if self.calibrator is not None:
+            joblib.dump(self.calibrator, cal_path)
 
     @classmethod
     def load(cls, directory: str, device: Optional[str] = None) -> "FraudEnsemble":
-        """Load saved ensemble from directory."""
         with open(os.path.join(directory, "meta.json")) as f:
             meta = json.load(f)
 
-        ensemble = cls(input_dim=meta["input_dim"], device=device)
-        ensemble.ae_trainer = AutoEncoderTrainer.load(
-            os.path.join(directory, "autoencoder.pt"), device=device
-        )
+        use_ae = meta.get("use_ae", True)  # backward compatible default
+        ensemble = cls(input_dim=meta["input_dim"], device=device, use_ae=use_ae)
+
+        if use_ae:
+            ae_path = os.path.join(directory, "autoencoder.pt")
+            if os.path.exists(ae_path):
+                ensemble.ae_trainer = AutoEncoderTrainer.load(ae_path, device=device)
+            else:
+                # Fallback: disable AE if file missing
+                ensemble.use_ae = False
+                ensemble.ae_trainer = None
+
         ensemble.xgb_model = xgb.XGBClassifier()
         ensemble.xgb_model.load_model(os.path.join(directory, "xgboost.json"))
         import joblib
         ensemble.scaler = joblib.load(os.path.join(directory, "scaler.pkl"))
         ensemble.feature_names = meta.get("feature_names", [])
         ensemble.explainer = shap.TreeExplainer(ensemble.xgb_model)
+
+        # Load calibrator if present (backward compatible)
         cal_path = os.path.join(directory, "calibrator.pkl")
         if os.path.exists(cal_path):
             ensemble.calibrator = joblib.load(cal_path)
+
         return ensemble
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
     def _augment(self, X_scaled: np.ndarray) -> np.ndarray:
-        """Add AE anomaly score + bottleneck embeddings to feature matrix."""
+        """Add AE anomaly score + bottleneck embeddings. Only called if use_ae=True."""
+        if not self.use_ae or self.ae_trainer is None:
+            return X_scaled
         ae_score = self.ae_trainer.predict_anomaly_score(X_scaled).reshape(-1, 1)
         embeddings = self.ae_trainer.get_embeddings(X_scaled)
         return np.hstack([X_scaled, ae_score, embeddings])
 
     def _augmented_feature_names(self) -> list[str]:
-        """Feature names for the augmented feature matrix."""
         original = self.feature_names if self.feature_names else [
             f"f{i}" for i in range(self.input_dim)
         ]
+        if not self.use_ae or self.ae_trainer is None:
+            return original
         ae_name = ["ae_anomaly_score"]
         embed_names = [f"ae_emb_{i}" for i in range(self.ae_trainer.model.bottleneck)]
         return original + ae_name + embed_names

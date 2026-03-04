@@ -1,0 +1,124 @@
+{
+  "global": [
+    {
+      "feature": "C13",
+      "shap": 1.4444679021835327
+    },
+    {
+      "feature": "D2",
+      "shap": 0.9303995370864868
+    },
+    {
+      "feature": "C1",
+      "shap": 0.7182002663612366
+    },
+    {
+      "feature": "addr_distance_km",
+      "shap": 0.5007137656211853
+    },
+    {
+      "feature": "C8",
+      "shap": 0.4452309012413025
+    },
+    {
+      "feature": "C14",
+      "shap": 0.44338276982307434
+    },
+    {
+      "feature": "D1",
+      "shap": 0.4275771379470825
+    },
+    {
+      "feature": "C4",
+      "shap": 0.3903443217277527
+    },
+    {
+      "feature": "D4",
+      "shap": 0.3660740852355957
+    },
+    {
+      "feature": "C11",
+      "shap": 0.3524307608604431
+    },
+    {
+      "feature": "card_std_amt",
+      "shap": 0.32190826535224915
+    },
+    {
+      "feature": "card_avg_amt",
+      "shap": 0.27669647336006165
+    },
+    {
+      "feature": "card_tx_count",
+      "shap": 0.24174028635025024
+    },
+    {
+      "feature": "C5",
+      "shap": 0.23430222272872925
+    },
+    {
+      "feature": "C2",
+      "shap": 0.2122921198606491
+    },
+    {
+      "feature": "C9",
+      "shap": 0.1826503872871399
+    },
+    {
+      "feature": "D3",
+      "shap": 0.17880713939666748
+    },
+    {
+      "feature": "C6",
+      "shap": 0.14678359031677246
+    },
+    {
+      "feature": "dist1",
+      "shap": 0.139268696308136
+    },
+    {
+      "feature": "C10",
+      "shap": 0.13716499507427216
+    },
+    {
+      "feature": "merchant_fraud_rate",
+      "shap": 0.12810297310352325
+    },
+    {
+      "feature": "TransactionAmt",
+      "shap": 0.11863557249307632
+    },
+    {
+      "feature": "tx_hour",
+      "shap": 0.11530245095491409
+    },
+    {
+      "feature": "dist2",
+      "shap": 0.110070139169693
+    },
+    {
+      "feature": "velocity_sum_24h",
+      "shap": 0.10966860502958298
+    },
+    {
+      "feature": "amt_zscore",
+      "shap": 0.09921083599328995
+    },
+    {
+      "feature": "velocity_sum_1h",
+      "shap": 0.09491156786680222
+    },
+    {
+      "feature": "amt_cents",
+      "shap": 0.0891544297337532
+    },
+    {
+      "feature": "C12",
+      "shap": 0.08500118553638458
+    },
+    {
+      "feature": "velocity_count_24h",
+      "shap": 0.0788084864616394
+    }
+  ]
+}

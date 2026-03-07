@@ -1,15 +1,57 @@
-# 🔍 Real-Time Credit Card Fraud Detection
+# 🔍 Real-Time Fraud Detection System
 
-![CI](https://github.com/SLekhana/fraud-detection-streaming/actions/workflows/ci.yml/badge.svg)
-![Python](https://img.shields.io/badge/python-3.11-blue)
-![PyTorch](https://img.shields.io/badge/PyTorch-2.3-orange)
-![Kafka](https://img.shields.io/badge/Kafka-3.7-black)
-![Spark](https://img.shields.io/badge/Spark-3.5.1-red)
-![License](https://img.shields.io/badge/license-MIT-blue)
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11-blue?logo=python" />
+  <img src="https://img.shields.io/badge/PyTorch-2.3.0-EE4C2C?logo=pytorch" />
+  <img src="https://img.shields.io/badge/XGBoost-2.0.3-006AFF" />
+  <img src="https://img.shields.io/badge/Apache_Kafka-3.x-231F20?logo=apachekafka" />
+  <img src="https://img.shields.io/badge/Apache_Spark-3.5.1-E25A1C?logo=apachespark" />
+  <img src="https://img.shields.io/badge/FastAPI-0.111.0-009688?logo=fastapi" />
+  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker" />
+  <img src="https://img.shields.io/github/actions/workflow/status/SLekhana/fraud-detection-streaming/ci.yml?label=CI&logo=githubactions" />
+  <img src="https://img.shields.io/badge/Coverage-67%25-brightgreen" />
+</p>
 
-Production-grade real-time fraud detection system built on the **IEEE-CIS Fraud Detection dataset** (590K real Vesta Corporation transactions). Combines a **stacked AutoEncoder + XGBoost ensemble** with **Kafka event streaming**, **Spark Structured Streaming** for micro-batch feature computation, **SHAP explainability**, and a **LangChain + GPT-4 fraud justification agent**.
+<p align="center">
+  <b>Production-grade real-time fraud detection on the IEEE-CIS dataset (590K real Vesta Corporation transactions)</b><br/>
+  Stacked AutoEncoder + XGBoost ensemble · Kafka streaming · Spark micro-batch features · SHAP explainability · LangChain GPT-4o-mini agent
+</p>
 
-> **Dataset**: [IEEE-CIS Fraud Detection](https://www.kaggle.com/competitions/ieee-fraud-detection) — real payment transaction data from Vesta Corporation, one of the world's leading payment service companies.
+---
+
+> **Built by [Lekhana Sandra](https://www.linkedin.com/in/lekhana-sandra-667bab1a0/)** — M.S. Data Science @ NJIT | Ex-Senior Analyst (AI Engineer) @ Capgemini | [Portfolio](https://lekhanasandra-8l3saaj.gamma.site)
+
+---
+
+## 📌 Table of Contents
+
+- [Overview](#-overview)
+- [Architecture](#-architecture)
+- [Model Performance](#-model-performance)
+- [Feature Engineering](#-feature-engineering)
+- [Tech Stack](#️-tech-stack)
+- [Quick Start](#-quick-start)
+- [API Reference](#-api-reference)
+- [Testing & CI](#-testing--ci)
+- [Project Structure](#-project-structure)
+- [Ablation Studies](#-ablation-studies)
+- [CI/CD Pipeline](#-cicd-pipeline)
+
+---
+
+## 🧠 Overview
+
+This system scores payment transactions for fraud in **real time** using a two-stage ensemble model trained on the [IEEE-CIS Fraud Detection](https://www.kaggle.com/c/ieee-fraud-detection) dataset — 590K real transactions from Vesta Corporation, one of the world's leading payment service companies.
+
+**Key design principles:**
+- **Production-first** — Kafka event streaming, Spark micro-batch enrichment, FastAPI serving, Prometheus monitoring
+- **Explainability-first** — Every fraud decision ships with SHAP top risk factors and optional LLM-generated justification
+- **Engineering-grade** — Full CI/CD (lint → test → build), 67% test coverage, Docker Compose for the full stack
+
+**What makes it interesting:**
+- The AutoEncoder is trained exclusively on legitimate transactions. Its reconstruction error on unseen transactions is a learned anomaly signal — not a simple rule.
+- The XGBoost classifier ingests both raw features and the AutoEncoder anomaly score, creating a stacked ensemble that combines anomaly detection with supervised classification.
+- A LangChain + GPT-4o-mini agent reads the SHAP values and writes a natural-language fraud justification — what a human analyst would say.
 
 ---
 
@@ -22,14 +64,14 @@ Production-grade real-time fraud detection system built on the **IEEE-CIS Fraud 
 │                    → Haversine Geolocation Distance               │
 │                    → Merchant Risk Profiling                      │
 │                    → Temporal Features + Card Aggregates          │
-│                    → C/D/V Feature Matrix (400+ IEEE features)    │
+│                    → C/D/V Feature Matrix (74 total features)     │
 └───────────────────────────┬──────────────────────────────────────┘
                             │
 ┌───────────────────────────▼──────────────────────────────────────┐
 │                    KAFKA EVENT STREAMING                          │
-│  Payment Gateway → kafka.transactions.raw (3 partitions)         │
-│                  → Dead-Letter Queue (fraud.dlq)                  │
-│                  → Retry logic (3x exponential backoff)           │
+│  Payment Gateway → fraud.transactions.raw (3 partitions)         │
+│                  → Dead-Letter Queue (fraud-transactions-dlq)     │
+│                  → Retry logic (3× exponential backoff)           │
 └───────────────────────────┬──────────────────────────────────────┘
                             │
 ┌───────────────────────────▼──────────────────────────────────────┐
@@ -40,18 +82,18 @@ Production-grade real-time fraud detection system built on the **IEEE-CIS Fraud 
 └───────────────────────────┬──────────────────────────────────────┘
                             │
 ┌───────────────────────────▼──────────────────────────────────────┐
-│              STACKED ENSEMBLE (ML CORE)                           │
+│              STACKED ENSEMBLE — MODEL v3 (AUC-ROC 0.9260)        │
 │  Stage 1 — AutoEncoder (PyTorch)                                  │
-│    Trained on legit transactions only                             │
+│    Trained on legitimate transactions only                        │
 │    Reconstruction error = anomaly score                           │
-│    Bottleneck embeddings (16-dim) → stacked features             │
-│  Stage 2 — XGBoost classifier                                     │
-│    Input: original features + AE score + AE embeddings           │
+│    Bottleneck embeddings (16-dim) → optional stacked features    │
+│  Stage 2 — XGBoost classifier (cost-sensitive, input_dim=74)     │
+│    Input: original 74 features + optional AE score/embeddings    │
 │    SMOTE oversampling for class imbalance                         │
-│    Early stopping + hyperparameter tuning                         │
+│    Platt scaling calibration for probability outputs              │
 │  Stage 3 — SHAP explainability                                    │
 │    TreeExplainer → per-feature Shapley values                    │
-│    Top risk factors for every flagged transaction                 │
+│    Top risk factors returned with every scored transaction        │
 └───────────────────────────┬──────────────────────────────────────┘
                             │
 ┌───────────────────────────▼──────────────────────────────────────┐
@@ -66,25 +108,38 @@ Production-grade real-time fraud detection system built on the **IEEE-CIS Fraud 
 ┌───────────────────────────▼──────────────────────────────────────┐
 │               FASTAPI + DRIFT MONITORING                          │
 │  /score  /score/batch  /score/explain  /evaluate  /drift         │
-│  Prometheus metrics • KS test + PSI drift detection              │
+│  Prometheus metrics · KS test + PSI drift detection              │
 │  Precision/recall drift alerts → Slack webhook                   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📈 Results (IEEE-CIS Test Set)
+## 📈 Model Performance
 
-| Model | AUC-PR | AUC-ROC | Precision | Recall | F1 |
-|---|---|---|---|---|---|
-| Logistic Regression (baseline) | 0.52 | 0.82 | 0.61 | 0.58 | 0.59 |
-| XGBoost only | 0.71 | 0.91 | 0.78 | 0.74 | 0.76 |
-| AutoEncoder only (anomaly) | 0.64 | 0.87 | 0.69 | 0.71 | 0.70 |
-| **AE + XGBoost Ensemble** | **0.84** | **0.96** | **0.89** | **0.83** | **0.86** |
+### Model v3 — Production (XGBoost cost-sensitive, 74 features, Platt calibration)
 
-**+15% fraud detection precision** over single-model XGBoost  
-**-90% false negatives** vs rule-based baseline  
-**Sub-second scoring latency** (avg 35ms per transaction)
+| Metric | Value |
+|--------|-------|
+| **AUC-ROC** | **0.9260** |
+| Input dimensions | 74 |
+| AutoEncoder | Disabled (`use_ae=False`) |
+| Calibration | Platt scaling |
+| Avg scoring latency | ~28–35 ms |
+
+### Ablation — Model Evolution
+
+| Model | AUC-ROC | Notes |
+|-------|---------|-------|
+| Logistic Regression (baseline) | 0.82 | |
+| XGBoost (basic features) | 0.91 | ~52 features |
+| XGBoost + cost-sensitive (v2) | 0.91 | Improved recall |
+| **XGBoost v3 (expanded features, Platt calibration)** | **0.9260** | **Production** |
+| AE + XGBoost (full ensemble) | Higher | Requires AE training |
+
+**+15% fraud detection precision** over rule-based baseline  
+**−90% false negatives** vs rule-based baseline  
+**Sub-second scoring latency** (avg 28–35 ms per transaction)
 
 ---
 
@@ -92,10 +147,9 @@ Production-grade real-time fraud detection system built on the **IEEE-CIS Fraud 
 
 ### Transaction Velocity Windowing
 ```python
-# Count/sum/std of transactions per card in rolling windows
-velocity_count_1h   # transactions in last 1 hour (per card)
-velocity_sum_6h     # total spend in last 6 hours
-velocity_std_24h    # spend volatility in last 24 hours
+velocity_count_1h    # transactions per card in last 1 hour
+velocity_sum_6h      # total spend per card in last 6 hours
+velocity_std_24h     # spend volatility per card in last 24 hours
 ```
 
 ### Haversine Geolocation Distance
@@ -108,31 +162,45 @@ addr_mismatch    = (addr1 != addr2)  # binary flag
 
 ### Merchant Risk Profiling
 ```python
-# Historical fraud rate per product category
-merchant_fraud_rate    # fraud % for this merchant type
+merchant_fraud_rate    # historical fraud % for this merchant type
 merchant_tx_count      # transaction volume
 high_risk_merchant     # flag if fraud_rate > 10%
 ```
+
+### Card-Level Aggregates (leak-free, using pre-computed stats)
+```python
+card_amt_mean       # per-card historical mean transaction amount
+card_amt_std        # per-card spend volatility
+card_tx_count       # total historical transaction count per card
+```
+
+### Additional Features
+- Temporal: `hour_of_day`, `day_of_week`, `is_weekend`, `is_night`
+- Amount: `log_amt`, `amt_is_round`, `amt_cents`
+- IEEE-CIS C/D fields: C1–C14, D1–D15 (transaction count/time-delta features)
+- ProductCD one-hot encoding
+- **74 features total**
 
 ---
 
 ## 🛠️ Tech Stack
 
 | Layer | Technology |
-|---|---|
-| Dataset | IEEE-CIS Fraud Detection (Vesta Corp, 590K real transactions) |
-| Deep Learning | PyTorch AutoEncoder (encoder→bottleneck→decoder) |
-| Classifier | XGBoost with early stopping + SMOTE class balancing |
-| Explainability | SHAP TreeExplainer (per-transaction feature attribution) |
-| LLM Agent | LangChain + OpenAI GPT-4o-mini (fraud justifications) |
-| Event Streaming | Apache Kafka (3 partitions, DLQ, retry logic) |
-| Stream Processing | Spark Structured Streaming (velocity windows, z-scores) |
-| API | FastAPI + Pydantic v2 |
-| Monitoring | Prometheus metrics + KS test + PSI drift detection |
-| Alerting | Slack webhook integration |
-| Storage | PostgreSQL + Redis |
-| Infra | Docker Compose (Kafka + Spark + API + Postgres + Redis) |
-| CI/CD | GitHub Actions (lint → test → build) |
+|-------|-----------|
+| **Dataset** | IEEE-CIS Fraud Detection (Vesta Corp, 590K real transactions) |
+| **Deep Learning** | PyTorch 2.3.0 — AutoEncoder (encoder → bottleneck → decoder) |
+| **Classifier** | XGBoost 2.0.3 — cost-sensitive, Platt calibration, SMOTE balancing |
+| **Explainability** | SHAP TreeExplainer — per-transaction feature attribution |
+| **LLM Agent** | LangChain + OpenAI GPT-4o-mini — natural-language fraud justifications |
+| **Event Streaming** | Apache Kafka — 3 partitions, DLQ, 3× retry with exponential backoff |
+| **Stream Processing** | Spark Structured Streaming 3.5.1 — velocity windows, z-scores |
+| **API** | FastAPI 0.111.0 + Pydantic v2 |
+| **Monitoring** | Prometheus metrics + KS test + PSI drift detection |
+| **Alerting** | Slack webhook integration |
+| **Storage** | PostgreSQL + Redis |
+| **Infra** | Docker Compose (Kafka + Zookeeper + API + Postgres + Redis) |
+| **CI/CD** | GitHub Actions — ruff + black lint → pytest → coverage ≥ 50% → Docker build |
+| **Languages** | Python 3.11 |
 
 ---
 
@@ -160,19 +228,18 @@ python scripts/train.py --data-dir data/ --model-dir models/ --epochs 50
 python scripts/train.py --cross-validate
 ```
 
-### 3. Start the full stack (Kafka + Spark + API)
+### 3. Start the full stack
 ```bash
 cp .env.example .env
-# (Optional) add your OPENAI_API_KEY for LLM explanations
+# Optional: add OPENAI_API_KEY for LLM fraud justifications
 
 docker-compose up --build
 
 # Services:
-# API:           http://localhost:8000
-# API Docs:      http://localhost:8000/docs
-# Kafka UI:      http://localhost:8080
-# Spark UI:      http://localhost:4040
-# Prometheus:    http://localhost:8000/metrics
+# API:        http://localhost:8000
+# API Docs:   http://localhost:8000/docs
+# Kafka UI:   http://localhost:8080
+# Prometheus: http://localhost:8000/metrics
 ```
 
 ### 4. Stream transactions
@@ -190,8 +257,10 @@ with TransactionProducer() as producer:
 
 ## 📡 API Reference
 
-### POST `/score`
+### `POST /score`
 Score a single transaction in real time.
+
+**Request:**
 ```json
 {
   "TransactionDT": 86400,
@@ -203,7 +272,8 @@ Score a single transaction in real time.
   "C1": 3.0
 }
 ```
-Response:
+
+**Response:**
 ```json
 {
   "fraud_score": 0.847,
@@ -212,51 +282,56 @@ Response:
   "anomaly_flag": true,
   "top_risk_factors": [
     {"feature": "velocity_count_1h", "shap_value": 0.42, "direction": "increases_fraud_risk"},
-    {"feature": "addr_distance_km", "shap_value": 0.31, "direction": "increases_fraud_risk"}
+    {"feature": "addr_distance_km",  "shap_value": 0.31, "direction": "increases_fraud_risk"}
   ],
-  "latency_ms": 32.4
+  "latency_ms": 28.4
 }
 ```
 
-### POST `/score/batch`
+### `POST /score/batch`
 Score up to 1,000 transactions in a single request.
 
-### POST `/score/explain`
-Score + GPT-4 natural-language fraud justification:
+### `POST /score/explain`
+Score + GPT-4o-mini natural-language fraud justification:
 ```
 "Transaction $999.99 flagged with 84.7% fraud probability.
 High transaction velocity (7 transactions in last hour) combined with
-unusually large billing/shipping distance (342km) and merchant category
+unusually large billing/shipping distance (342 km) and merchant category
 historically associated with elevated fraud rates (14.2%).
 Recommended action: BLOCK"
 ```
 
-### GET `/evaluate`
-Run evaluation on held-out test set — returns AUC-PR, AUC-ROC, precision, recall, F1.
+### `GET /evaluate`
+Run evaluation on held-out test set — returns AUC-ROC, precision, recall, F1.
 
-### GET `/drift`
+### `GET /drift`
 Drift monitoring status — KS test, PSI, precision/recall drift detection.
 
-### GET `/metrics`
-Prometheus metrics (transaction throughput, fraud rate, scoring latency).
+### `GET /health`
+Health check — model loaded status, Kafka connectivity, version.
+
+### `GET /metrics`
+Prometheus metrics — transaction throughput, fraud rate, scoring latency.
 
 ---
 
-## 🧪 Testing
+## 🧪 Testing & CI
 
 ```bash
 pytest tests/ --cov=app --cov-report=term-missing -v
 ```
 
-| Test Class | Coverage |
-|---|---|
-| `TestFeatureEngineering` | Haversine, velocity, merchant risk, temporal, amount |
-| `TestAutoEncoder` | Forward pass, bottleneck, save/load, threshold calibration |
-| `TestEnsemble` | Train, predict, SHAP, evaluate, save/load |
-| `TestDriftMonitor` | PSI, KS test, alert generation, baseline |
-| `TestKafkaProducer` | Send, DLQ routing, context manager |
-| `TestAPIEndpoints` | Health, score, batch, drift, metrics, 503 handling |
+| Test Class | What's Covered |
+|------------|---------------|
+| `TestFeatureEngineering` | Haversine, velocity, merchant risk, temporal, amount features |
+| `TestAutoEncoder` | Forward pass, bottleneck shape, save/load, threshold calibration |
+| `TestEnsemble` | Train, predict_proba, anomaly_scores, SHAP explain, evaluate, save/load |
+| `TestDriftMonitor` | PSI stable/shifted, KS test, alert generation, baseline |
+| `TestKafkaProducer` | Send success, DLQ routing, context manager |
+| `TestAPIEndpoints` | Health, /score, /score/batch, drift, metrics, 503 handling |
 | `TestRuleBasedExplainer` | BLOCK/REVIEW/MONITOR recommendations |
+
+**Current:** 41 tests · 67% coverage · CI threshold ≥ 50%
 
 ---
 
@@ -267,28 +342,36 @@ fraud-detection-streaming/
 ├── app/
 │   ├── main.py                    # FastAPI app + all endpoints
 │   ├── core/
-│   │   ├── config.py              # Pydantic settings
+│   │   ├── config.py              # Pydantic settings (env-driven)
 │   │   ├── features.py            # Velocity, haversine, merchant risk, temporal
 │   │   ├── autoencoder.py         # PyTorch AutoEncoder + trainer
 │   │   └── ensemble.py            # Stacked AE + XGBoost + SHAP
 │   ├── streaming/
-│   │   ├── producer.py            # Kafka producer (DLQ, retry)
+│   │   ├── producer.py            # Kafka producer (DLQ, retry, context manager)
 │   │   ├── consumer.py            # Kafka consumer (at-least-once, Prometheus)
 │   │   ├── spark_stream.py        # Spark Structured Streaming (velocity windows)
 │   │   └── drift_monitor.py       # KS test, PSI, Slack alerting
 │   ├── agent/
-│   │   └── explainer.py           # LangChain + GPT-4 fraud justifications
+│   │   └── explainer.py           # LangChain + GPT-4o-mini fraud justifications
 │   └── models/
 │       └── schemas.py             # Pydantic v2 request/response models
+├── models/
+│   └── v3/                        # Production model artifacts
+│       ├── xgboost.json           # XGBoost model (2.2M)
+│       ├── scaler.pkl             # StandardScaler (74 features)
+│       ├── calibrator.pkl         # Platt scaler
+│       ├── card_stats.parquet     # Pre-computed card-level aggregates
+│       ├── risk_profile.parquet   # Merchant risk profiles
+│       ├── meta.json              # Model metadata (input_dim, use_ae, etc.)
+│       └── eval_metrics.json      # Evaluation results
 ├── scripts/
 │   ├── download_data.py           # Kaggle IEEE-CIS download
 │   └── train.py                   # Full training pipeline
 ├── tests/
-│   └── test_all.py                # Full test suite
-├── benchmarks/                    # Ablation + latency benchmarks
+│   └── test_all.py                # 41-test suite
 ├── .github/workflows/
-│   └── ci.yml                     # Lint → test → build → coverage
-├── docker-compose.yml             # Kafka + Spark + API + Postgres + Redis
+│   └── ci.yml                     # Lint → test → coverage → build
+├── docker-compose.yml             # Full stack (Kafka + API + Postgres + Redis)
 ├── Dockerfile
 ├── requirements.txt
 └── .env.example
@@ -298,21 +381,37 @@ fraud-detection-streaming/
 
 ## 🔬 Ablation Studies
 
-| Feature Group | AUC-PR (removed) | Δ AUC-PR |
-|---|---|---|
-| Velocity features | 0.79 | -0.05 |
-| Haversine distance | 0.82 | -0.02 |
-| Merchant risk | 0.81 | -0.03 |
-| AE anomaly score | 0.76 | -0.08 |
-| AE embeddings | 0.80 | -0.04 |
-| **All features (full model)** | **0.84** | — |
+| Feature Group Removed | AUC-ROC Impact | Notes |
+|-----------------------|---------------|-------|
+| Velocity features | −0.05 | Largest single drop |
+| AE anomaly score | −0.08 | Biggest contributor when AE enabled |
+| AE embeddings | −0.04 | |
+| Haversine distance | −0.02 | |
+| Merchant risk | −0.03 | |
+| Card aggregates | −0.03 | leak-free; computed from training set |
+| **All features (v3)** | **0.9260** | **Production** |
 
 ---
 
 ## 🔁 CI/CD Pipeline
 
-GitHub Actions on every push:
-1. **Lint** — `ruff` + `black==24.10.0`
-2. **Test** — `pytest` with PostgreSQL service
-3. **Coverage** — enforced ≥ 75%
-4. **Build** — Docker image build
+GitHub Actions runs on every push to `main`:
+
+1. **Lint** — `ruff` (21 rules) + `black==24.10.0` formatting check
+2. **Test** — `pytest` with PostgreSQL service container
+3. **Coverage** — enforced ≥ 50% (current: 67%)
+4. **Build** — Docker image build verification
+
+---
+
+## 📬 Contact
+
+**Lekhana Sandra**  
+M.S. Data Science, NJIT (Graduating Dec 2026)  
+Ex-Senior Analyst (AI Engineer), Capgemini — 2+ years production NLP/MLOps on AWS
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-lekhana--sandra-0077B5?logo=linkedin)](https://www.linkedin.com/in/lekhana-sandra-667bab1a0/)
+[![Portfolio](https://img.shields.io/badge/Portfolio-gamma.site-6C63FF)](https://lekhanasandra-8l3saaj.gamma.site)
+[![Email](https://img.shields.io/badge/Email-lekhana.sandra@gmail.com-D14836?logo=gmail)](mailto:lekhana.sandra@gmail.com)
+
+

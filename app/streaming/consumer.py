@@ -13,6 +13,7 @@ Topics:
   fraud-scores            ← scored results
   fraud-transactions-dlq  ← dead-letter queue (failed after all retries)
 """
+
 from __future__ import annotations
 
 import json
@@ -34,11 +35,12 @@ DLQ_TOPIC = "fraud-transactions-dlq"
 CONSUMER_GROUP = "fraud-scorer-group"
 
 MAX_RETRIES = 3
-RETRY_BACKOFF_BASE_S = 1.0   # exponential: 1s, 2s, 4s
+RETRY_BACKOFF_BASE_S = 1.0  # exponential: 1s, 2s, 4s
 POLL_TIMEOUT_MS = 1000
 
 
 # ─── DLQ message ─────────────────────────────────────────────────────────────
+
 
 @dataclass
 class DLQMessage:
@@ -49,7 +51,9 @@ class DLQMessage:
     error_type: str
     error_message: str
     retry_count: int
-    failed_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    failed_at: str = field(
+        default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -65,6 +69,7 @@ class DLQMessage:
 
 
 # ─── Consumer ────────────────────────────────────────────────────────────────
+
 
 class FraudConsumer:
     """
@@ -88,7 +93,7 @@ class FraudConsumer:
             bootstrap_servers=KAFKA_BOOTSTRAP,
             group_id=CONSUMER_GROUP,
             auto_offset_reset="latest",
-            enable_auto_commit=False,   # manual commit after successful scoring
+            enable_auto_commit=False,  # manual commit after successful scoring
             value_deserializer=lambda b: json.loads(b.decode("utf-8")),
             max_poll_records=100,
             session_timeout_ms=30000,
@@ -99,19 +104,22 @@ class FraudConsumer:
             bootstrap_servers=KAFKA_BOOTSTRAP,
             value_serializer=lambda v: json.dumps(v).encode("utf-8"),
             retries=5,
-            acks="all",               # wait for all replicas to confirm
+            acks="all",  # wait for all replicas to confirm
             compression_type="gzip",
         )
 
-        logger.info("consumer_initialized",
-                    topic=CONSUMER_TOPIC,
-                    group=CONSUMER_GROUP,
-                    dlq_topic=DLQ_TOPIC)
+        logger.info(
+            "consumer_initialized",
+            topic=CONSUMER_TOPIC,
+            group=CONSUMER_GROUP,
+            dlq_topic=DLQ_TOPIC,
+        )
 
     def _load_model(self):
         if self._model is not None:
             return self._model
         from app.core.ensemble import FraudEnsemble
+
         self._model = FraudEnsemble.load(self.model_dir)
         logger.info("model_loaded", model_dir=self.model_dir)
         return self._model
@@ -129,7 +137,11 @@ class FraudConsumer:
         shap_result = model.explain_single(X[0])
 
         latency_ms = (time.perf_counter() - t0) * 1000
-        ae_threshold = (model.ae_trainer.threshold if model.ae_trainer is not None and model.ae_trainer.threshold else 0.05)
+        ae_threshold = (
+            model.ae_trainer.threshold
+            if model.ae_trainer is not None and model.ae_trainer.threshold
+            else 0.05
+        )
 
         return {
             "transaction_id": tx_dict.get("TransactionID"),
@@ -142,7 +154,9 @@ class FraudConsumer:
             "scored_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
 
-    def _send_to_dlq(self, record, payload: dict, error: Exception, retries: int) -> None:
+    def _send_to_dlq(
+        self, record, payload: dict, error: Exception, retries: int
+    ) -> None:
         """Send failed message to dead-letter queue."""
         dlq_msg = DLQMessage(
             original_topic=record.topic,
@@ -193,7 +207,7 @@ class FraudConsumer:
 
             except Exception as e:
                 last_error = e
-                wait = RETRY_BACKOFF_BASE_S * (2 ** attempt)
+                wait = RETRY_BACKOFF_BASE_S * (2**attempt)
                 logger.warning(
                     "score_failed_retrying",
                     transaction_id=tx_id,
@@ -231,10 +245,12 @@ class FraudConsumer:
                             failures += 1
 
                 if processed > 0 and processed % 100 == 0:
-                    logger.info("consumer_progress",
-                                processed=processed,
-                                failures=failures,
-                                dlq_rate=round(failures / (processed + failures), 4))
+                    logger.info(
+                        "consumer_progress",
+                        processed=processed,
+                        failures=failures,
+                        dlq_rate=round(failures / (processed + failures), 4),
+                    )
 
         except KeyboardInterrupt:
             logger.info("consumer_stopping", reason="keyboard_interrupt")

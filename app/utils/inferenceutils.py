@@ -12,6 +12,7 @@ Key problem solved:
 
 This ensures the model always receives a vector of the correct shape.
 """
+
 from __future__ import annotations
 
 import json
@@ -44,6 +45,7 @@ def _load_expected_features(model_dir: str = "models") -> list[str]:
             return original
     # Fallback to NUMERIC_COLS
     from app.core.features import NUMERIC_COLS
+
     return NUMERIC_COLS
 
 
@@ -54,24 +56,24 @@ def build_inference_features(
 ) -> np.ndarray:
     """
     Build a correctly-shaped feature vector for a single transaction.
-    
+
     Missing columns are zero-filled so the model receives the same
     dimension it was trained on.
-    
+
     Args:
         tx_dict: Raw transaction dict from the API request.
         model_dir: Path to saved model directory (has meta.json).
         risk_profile: Pre-computed merchant risk profile (optional).
-    
+
     Returns:
         np.ndarray of shape (1, n_features) — ready for model.predict_proba()
     """
     expected_cols = _load_expected_features(model_dir)
-    
+
     # Run feature engineering
     df = pd.DataFrame([tx_dict])
     df = build_features(df, risk_profile=risk_profile, fast=False)
-    
+
     # Build output array with zeros for any missing column
     row = {}
     for col in expected_cols:
@@ -79,7 +81,7 @@ def build_inference_features(
             row[col] = float(df[col].fillna(0).iloc[0])
         else:
             row[col] = 0.0
-    
+
     return np.array([[row[c] for c in expected_cols]]), expected_cols
 
 

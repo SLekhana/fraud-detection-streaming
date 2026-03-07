@@ -10,6 +10,7 @@ Endpoints:
   GET  /drift           — drift monitoring status
   GET  /metrics         — Prometheus metrics
 """
+
 from __future__ import annotations
 
 import time
@@ -57,6 +58,7 @@ def _load_model():
         return _model
     try:
         from app.core.ensemble import FraudEnsemble
+
         _model = FraudEnsemble.load(settings.model_path)
         _model_loaded = True
         logger.info("model_loaded", path=settings.model_path)
@@ -77,6 +79,7 @@ def _get_model():
 
 
 # ─── App lifecycle ───────────────────────────────────────────────────────────
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -108,6 +111,7 @@ app.add_middleware(
 
 # ─── Request logging middleware ───────────────────────────────────────────────
 
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.perf_counter()
@@ -125,7 +129,10 @@ async def log_requests(request: Request, call_next):
 
 # ─── Internal scoring helper ──────────────────────────────────────────────────
 
-def _score_transaction(tx_dict: dict, include_explanation: bool = False) -> FraudScoreResponse:
+
+def _score_transaction(
+    tx_dict: dict, include_explanation: bool = False
+) -> FraudScoreResponse:
     """Core scoring logic shared by single and batch endpoints."""
     from app.utils.inference_utils import build_inference_features
     from app.agent.explainer import get_explainer
@@ -137,12 +144,18 @@ def _score_transaction(tx_dict: dict, include_explanation: bool = False) -> Frau
     X, feat_cols = build_inference_features(tx_dict, settings.model_path)
 
     if X.shape[1] == 0:
-        raise HTTPException(status_code=422, detail="No valid feature columns found in transaction.")
+        raise HTTPException(
+            status_code=422, detail="No valid feature columns found in transaction."
+        )
 
     # Score
     fraud_score = float(model.predict_proba(X)[0])
     anomaly_score = float(model.anomaly_scores(X)[0])
-    ae_threshold = (model.ae_trainer.threshold if model.ae_trainer is not None and model.ae_trainer.threshold else 0.05)
+    ae_threshold = (
+        model.ae_trainer.threshold
+        if model.ae_trainer is not None and model.ae_trainer.threshold
+        else 0.05
+    )
     is_fraud = fraud_score >= settings.threshold_ensemble
     anomaly_flag = anomaly_score > ae_threshold
 
@@ -185,12 +198,14 @@ def _score_transaction(tx_dict: dict, include_explanation: bool = False) -> Frau
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
+
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 async def health():
     """Health check — returns model and Kafka connectivity status."""
     kafka_ok = False
     try:
         from kafka import KafkaAdminClient
+
         admin = KafkaAdminClient(bootstrap_servers=settings.kafka_bootstrap_servers)
         admin.close()
         kafka_ok = True
@@ -262,6 +277,7 @@ async def evaluate(n_samples: int = 1000, threshold: float = 0.5):
             test_df = test_df.sample(n=n_samples, random_state=42)
 
         from app.core.features import get_feature_columns
+
         feat_cols = get_feature_columns(test_df)
         X = test_df[feat_cols].fillna(0).values
         y = test_df["isFraud"].values

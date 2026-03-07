@@ -9,6 +9,7 @@ Covers:
 - Drift monitor (KS test, PSI, alerts)
 - FastAPI endpoints (health, score, batch, explain, evaluate, drift)
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -76,6 +77,7 @@ def sample_transactions() -> pd.DataFrame:
 @pytest.fixture
 def feature_df(sample_transactions):
     from app.core.features import build_features, build_merchant_risk_profile
+
     risk = build_merchant_risk_profile(sample_transactions)
     return build_features(sample_transactions, risk_profile=risk, fast=True)
 
@@ -83,6 +85,7 @@ def feature_df(sample_transactions):
 @pytest.fixture
 def X_y(feature_df):
     from app.core.features import get_feature_columns
+
     feat_cols = get_feature_columns(feature_df)
     X = feature_df[feat_cols].fillna(0).values
     y = feature_df["isFraud"].values
@@ -95,17 +98,20 @@ def X_y(feature_df):
 class TestFeatureEngineering:
     def test_haversine_zero_distance(self):
         from app.core.features import haversine_distance
+
         d = haversine_distance(40.0, -74.0, 40.0, -74.0)
         assert d == pytest.approx(0.0, abs=1e-6)
 
     def test_haversine_known_distance(self):
         from app.core.features import haversine_distance
+
         # NYC to LA is roughly 3940 km
         d = haversine_distance(40.7128, -74.0060, 34.0522, -118.2437)
         assert 3800 < d < 4100
 
     def test_address_distance_added(self, sample_transactions):
         from app.core.features import add_address_distance
+
         df = add_address_distance(sample_transactions)
         assert "addr_distance_km" in df.columns
         assert "addr_mismatch" in df.columns
@@ -113,6 +119,7 @@ class TestFeatureEngineering:
 
     def test_temporal_features(self, sample_transactions):
         from app.core.features import add_temporal_features
+
         df = add_temporal_features(sample_transactions)
         assert "tx_hour" in df.columns
         assert df["tx_hour"].between(0, 23).all()
@@ -121,6 +128,7 @@ class TestFeatureEngineering:
 
     def test_velocity_features_fast(self, sample_transactions):
         from app.core.features import add_velocity_features_fast
+
         df = add_velocity_features_fast(sample_transactions, windows_hours=[1, 24])
         assert "velocity_count_1h" in df.columns
         assert "velocity_count_24h" in df.columns
@@ -128,6 +136,7 @@ class TestFeatureEngineering:
 
     def test_merchant_risk_profile(self, sample_transactions):
         from app.core.features import build_merchant_risk_profile, add_merchant_risk
+
         profile = build_merchant_risk_profile(sample_transactions)
         assert "merchant_fraud_rate" in profile.columns
         assert (profile["merchant_fraud_rate"] >= 0).all()
@@ -139,6 +148,7 @@ class TestFeatureEngineering:
 
     def test_amount_features(self, sample_transactions):
         from app.core.features import add_amount_features
+
         df = add_amount_features(sample_transactions)
         assert "log_amt" in df.columns
         assert (df["log_amt"] >= 0).all()
@@ -146,6 +156,7 @@ class TestFeatureEngineering:
 
     def test_build_features_full_pipeline(self, feature_df):
         from app.core.features import get_feature_columns
+
         feat_cols = get_feature_columns(feature_df)
         assert len(feat_cols) > 10
         # No NaNs in feature columns
@@ -153,6 +164,7 @@ class TestFeatureEngineering:
 
     def test_card_aggregates(self, sample_transactions):
         from app.core.features import add_card_aggregates
+
         df = add_card_aggregates(sample_transactions)
         assert "card_avg_amt" in df.columns
         assert "amt_zscore" in df.columns
@@ -164,6 +176,7 @@ class TestFeatureEngineering:
 class TestAutoEncoder:
     def test_forward_pass(self):
         from app.core.autoencoder import FraudAutoEncoder
+
         model = FraudAutoEncoder(input_dim=20, bottleneck=8)
         x = torch.randn(16, 20)
         out = model(x)
@@ -171,6 +184,7 @@ class TestAutoEncoder:
 
     def test_reconstruction_error_positive(self):
         from app.core.autoencoder import FraudAutoEncoder
+
         model = FraudAutoEncoder(input_dim=20, bottleneck=8)
         x = torch.randn(16, 20)
         errors = model.reconstruction_error(x)
@@ -179,6 +193,7 @@ class TestAutoEncoder:
 
     def test_encode_bottleneck_shape(self):
         from app.core.autoencoder import FraudAutoEncoder
+
         model = FraudAutoEncoder(input_dim=20, bottleneck=8)
         x = torch.randn(16, 20)
         z = model.encode(x)
@@ -186,6 +201,7 @@ class TestAutoEncoder:
 
     def test_trainer_fit_and_threshold(self):
         from app.core.autoencoder import AutoEncoderTrainer
+
         X = np.random.randn(200, 20).astype(np.float32)
         trainer = AutoEncoderTrainer(input_dim=20, bottleneck=8)
         trainer.fit(X, epochs=3, patience=5, verbose=False)
@@ -194,6 +210,7 @@ class TestAutoEncoder:
 
     def test_trainer_predict_binary(self):
         from app.core.autoencoder import AutoEncoderTrainer
+
         X = np.random.randn(100, 20).astype(np.float32)
         trainer = AutoEncoderTrainer(input_dim=20, bottleneck=8)
         trainer.fit(X, epochs=2, verbose=False)
@@ -204,6 +221,7 @@ class TestAutoEncoder:
 
     def test_trainer_save_load(self, tmp_path):
         from app.core.autoencoder import AutoEncoderTrainer
+
         X = np.random.randn(100, 20).astype(np.float32)
         trainer = AutoEncoderTrainer(input_dim=20, bottleneck=8)
         trainer.fit(X, epochs=2, verbose=False)
@@ -227,6 +245,7 @@ class TestEnsemble:
     @pytest.fixture
     def trained_ensemble(self, X_y):
         from app.core.ensemble import FraudEnsemble
+
         X, y, feat_cols = X_y
         # Ensure at least a few fraud samples
         y[: max(5, int(len(y) * 0.03))] = 1
@@ -282,6 +301,7 @@ class TestEnsemble:
 class TestDriftMonitor:
     def test_psi_stable(self):
         from app.streaming.drift_monitor import compute_psi
+
         expected = np.random.uniform(0, 1, 1000)
         actual = np.random.uniform(0, 1, 1000)
         psi = compute_psi(expected, actual)
@@ -289,6 +309,7 @@ class TestDriftMonitor:
 
     def test_psi_shifted(self):
         from app.streaming.drift_monitor import compute_psi
+
         expected = np.random.uniform(0, 0.3, 1000)
         actual = np.random.uniform(0.7, 1.0, 1000)
         psi = compute_psi(expected, actual)
@@ -296,6 +317,7 @@ class TestDriftMonitor:
 
     def test_set_baseline(self):
         from app.streaming.drift_monitor import DriftMonitor
+
         monitor = DriftMonitor()
         scores = np.random.uniform(0, 1, 500)
         labels = (scores > 0.5).astype(int)
@@ -305,6 +327,7 @@ class TestDriftMonitor:
 
     def test_record_and_summary(self):
         from app.streaming.drift_monitor import DriftMonitor
+
         monitor = DriftMonitor()
         for _ in range(200):
             monitor.record(np.random.uniform(0, 1))
@@ -314,6 +337,7 @@ class TestDriftMonitor:
 
     def test_check_no_alerts_stable(self):
         from app.streaming.drift_monitor import DriftMonitor
+
         monitor = DriftMonitor()
         scores = np.random.uniform(0.1, 0.4, 500)
         labels = np.zeros(500, dtype=int)
@@ -326,6 +350,7 @@ class TestDriftMonitor:
 
     def test_no_crash_without_baseline(self):
         from app.streaming.drift_monitor import DriftMonitor
+
         monitor = DriftMonitor()
         for _ in range(200):
             monitor.record(np.random.uniform(0, 1))
@@ -339,6 +364,7 @@ class TestDriftMonitor:
 class TestKafkaProducer:
     def test_send_success(self):
         from app.streaming.producer import TransactionProducer
+
         with patch("app.streaming.producer.KafkaProducer") as mock_kafka:
             mock_future = MagicMock()
             mock_future.get.return_value = None
@@ -360,6 +386,7 @@ class TestKafkaProducer:
 
     def test_context_manager(self):
         from app.streaming.producer import TransactionProducer
+
         with patch("app.streaming.producer.KafkaProducer") as mock_kafka:
             mock_kafka.return_value.flush.return_value = None
             mock_kafka.return_value.close.return_value = None
@@ -375,6 +402,7 @@ class TestAPIEndpoints:
     @pytest.fixture
     def client(self):
         from app.main import app
+
         return TestClient(app)
 
     def test_health_endpoint(self, client):
@@ -387,6 +415,7 @@ class TestAPIEndpoints:
 
     def test_score_no_model_returns_503(self, client):
         import app.main as main_module
+
         original = main_module._model_loaded
         main_module._model_loaded = False
         main_module._model = None
@@ -454,7 +483,11 @@ class TestAPIEndpoints:
 
         payload = {
             "transactions": [
-                {"TransactionDT": 86400, "TransactionAmt": float(100 + i), "card1": 1234}
+                {
+                    "TransactionDT": 86400,
+                    "TransactionAmt": float(100 + i),
+                    "card1": 1234,
+                }
                 for i in range(5)
             ],
             "include_explanations": False,
@@ -498,20 +531,32 @@ class TestAPIEndpoints:
 class TestRuleBasedExplainer:
     def test_explain_returns_string(self):
         from app.agent.explainer import RuleBasedExplainer
+
         explainer = RuleBasedExplainer()
         tx = {"TransactionID": 1, "TransactionAmt": 999.99, "ProductCD": "W"}
         shap_result = {
             "top_features": [
-                {"feature": "velocity_count_1h", "shap_value": 0.8, "direction": "increases_fraud_risk"},
-                {"feature": "addr_distance_km", "shap_value": 0.5, "direction": "increases_fraud_risk"},
+                {
+                    "feature": "velocity_count_1h",
+                    "shap_value": 0.8,
+                    "direction": "increases_fraud_risk",
+                },
+                {
+                    "feature": "addr_distance_km",
+                    "shap_value": 0.5,
+                    "direction": "increases_fraud_risk",
+                },
             ]
         }
-        result = explainer.explain(tx, shap_result, anomaly_score=0.1, ae_threshold=0.05, fraud_score=0.85)
+        result = explainer.explain(
+            tx, shap_result, anomaly_score=0.1, ae_threshold=0.05, fraud_score=0.85
+        )
         assert isinstance(result, str)
         assert len(result) > 20
 
     def test_explain_high_score_recommends_block(self):
         from app.agent.explainer import RuleBasedExplainer
+
         explainer = RuleBasedExplainer()
         tx = {"TransactionAmt": 5000.0}
         result = explainer.explain(tx, {"top_features": []}, 0.2, 0.05, fraud_score=0.9)
@@ -519,7 +564,10 @@ class TestRuleBasedExplainer:
 
     def test_explain_low_score_recommends_monitor(self):
         from app.agent.explainer import RuleBasedExplainer
+
         explainer = RuleBasedExplainer()
         tx = {"TransactionAmt": 20.0}
-        result = explainer.explain(tx, {"top_features": []}, 0.01, 0.05, fraud_score=0.2)
+        result = explainer.explain(
+            tx, {"top_features": []}, 0.01, 0.05, fraud_score=0.2
+        )
         assert "MONITOR" in result

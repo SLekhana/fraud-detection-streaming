@@ -16,6 +16,7 @@ Covers:
 - IEEE-CIS V-columns (Vesta engineered, top 20 by variance)
 - IEEE-CIS identity numeric features (id_01–id_11)
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -25,9 +26,8 @@ from typing import Optional
 
 # ─── Haversine distance ─────────────────────────────────────────────────────
 
-def haversine_distance(
-    lat1: float, lon1: float, lat2: float, lon2: float
-) -> float:
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """
     Compute great-circle distance (km) between two lat/lon pairs.
     Used as proxy for billing-vs-shipping address distance in IEEE-CIS.
@@ -56,6 +56,7 @@ def add_address_distance(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─── Transaction velocity windowing ─────────────────────────────────────────
+
 
 def add_velocity_features(
     df: pd.DataFrame,
@@ -143,6 +144,7 @@ def add_velocity_features_fast(
 
 # ─── Merchant risk profiling ─────────────────────────────────────────────────
 
+
 def compute_risk_profile(
     df: pd.DataFrame,
     target_col: str = "isFraud",
@@ -153,7 +155,9 @@ def compute_risk_profile(
     Call on TRAINING data only; pass result to add_merchant_risk() on test data.
     Exported alias of build_merchant_risk_profile for clarity.
     """
-    return build_merchant_risk_profile(df, target_col=target_col, category_col=category_col)
+    return build_merchant_risk_profile(
+        df, target_col=target_col, category_col=category_col
+    )
 
 
 def build_merchant_risk_profile(
@@ -185,6 +189,7 @@ def add_merchant_risk(
 
 # ─── Temporal features ───────────────────────────────────────────────────────
 
+
 def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     ref = pd.Timestamp("2017-11-30")
@@ -197,6 +202,7 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ─── Card-level aggregates ───────────────────────────────────────────────────
+
 
 def compute_card_stats(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -244,6 +250,7 @@ def add_card_aggregates(
 
 # ─── Amount features ─────────────────────────────────────────────────────────
 
+
 def add_amount_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["log_amt"] = np.log1p(df["TransactionAmt"])
@@ -256,36 +263,95 @@ def add_amount_features(df: pd.DataFrame) -> pd.DataFrame:
 
 NUMERIC_COLS = [
     # Amount
-    "TransactionAmt", "log_amt", "amt_is_round", "amt_cents",
+    "TransactionAmt",
+    "log_amt",
+    "amt_is_round",
+    "amt_cents",
     # Address
-    "addr_distance_km", "addr_mismatch",
+    "addr_distance_km",
+    "addr_mismatch",
     # Velocity (now uses correct time-based rolling)
-    "velocity_count_1h", "velocity_sum_1h", "velocity_std_1h",
-    "velocity_count_6h", "velocity_sum_6h", "velocity_std_6h",
-    "velocity_count_24h", "velocity_sum_24h", "velocity_std_24h",
+    "velocity_count_1h",
+    "velocity_sum_1h",
+    "velocity_std_1h",
+    "velocity_count_6h",
+    "velocity_sum_6h",
+    "velocity_std_6h",
+    "velocity_count_24h",
+    "velocity_sum_24h",
+    "velocity_std_24h",
     # Merchant risk
-    "merchant_fraud_rate", "merchant_tx_count", "high_risk_merchant",
+    "merchant_fraud_rate",
+    "merchant_tx_count",
+    "high_risk_merchant",
     # Temporal
-    "tx_hour", "tx_day_of_week", "tx_is_weekend", "tx_is_night",
+    "tx_hour",
+    "tx_day_of_week",
+    "tx_is_weekend",
+    "tx_is_night",
     # Card aggregates (computed from train only)
-    "card_avg_amt", "card_std_amt", "card_tx_count", "amt_zscore",
+    "card_avg_amt",
+    "card_std_amt",
+    "card_tx_count",
+    "amt_zscore",
     # Distance features
-    "dist1", "dist2",
+    "dist1",
+    "dist2",
     # Count features (behavioral)
-    "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10",
-    "C11", "C12", "C13", "C14",
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6",
+    "C7",
+    "C8",
+    "C9",
+    "C10",
+    "C11",
+    "C12",
+    "C13",
+    "C14",
     # Timedelta features
-    "D1", "D2", "D3", "D4",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
     # Vesta-engineered features — expanded from V1-V6 to V1-V20
     # These are masked/normalised by Vesta but carry strong signal
-    "V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10",
-    "V11", "V12", "V13", "V14", "V15", "V16", "V17", "V18", "V19", "V20",
+    "V1",
+    "V2",
+    "V3",
+    "V4",
+    "V5",
+    "V6",
+    "V7",
+    "V8",
+    "V9",
+    "V10",
+    "V11",
+    "V12",
+    "V13",
+    "V14",
+    "V15",
+    "V16",
+    "V17",
+    "V18",
+    "V19",
+    "V20",
     # Numeric identity features (from train_identity.csv)
     # id_01: device screen resolution width proxy
     # id_02: device screen resolution height proxy
     # id_03..id_06: network/browser numeric signals
     # id_09..id_11: additional numeric device signals
-    "id_01", "id_02", "id_03", "id_05", "id_06", "id_09", "id_10", "id_11",
+    "id_01",
+    "id_02",
+    "id_03",
+    "id_05",
+    "id_06",
+    "id_09",
+    "id_10",
+    "id_11",
 ]
 
 

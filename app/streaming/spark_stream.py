@@ -8,6 +8,7 @@ This is the production path for high-throughput scenarios (millions of
 transactions/day). For lower throughput, the Kafka consumer + FastAPI
 scoring path is used.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,7 +16,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def build_spark_session(app_name: str = "FraudDetectionStreaming", master: str = "local[*]"):
+def build_spark_session(
+    app_name: str = "FraudDetectionStreaming", master: str = "local[*]"
+):
     """Build and return a SparkSession."""
     try:
         from pyspark.sql import SparkSession
@@ -38,6 +41,7 @@ def build_spark_session(app_name: str = "FraudDetectionStreaming", master: str =
 
 
 # ─── Schema ──────────────────────────────────────────────────────────────────
+
 
 def get_transaction_schema():
     """Spark schema for IEEE-CIS transaction records."""
@@ -91,6 +95,7 @@ def get_transaction_schema():
 
 
 # ─── Streaming pipeline ──────────────────────────────────────────────────────
+
 
 class SparkFraudStream:
     """
@@ -197,17 +202,16 @@ class SparkFraudStream:
 
         # ── Enrich base stream ─────────────────────────────────────────────
         enriched = parsed.withColumn("log_amt", F.log1p(F.col("TransactionAmt")))
-        enriched = enriched.withColumn(
-            "tx_hour",
-            F.hour(F.col("event_time"))
-        )
+        enriched = enriched.withColumn("tx_hour", F.hour(F.col("event_time")))
         enriched = enriched.withColumn(
             "tx_is_weekend",
             (F.dayofweek(F.col("event_time")).isin([1, 7])).cast("integer"),
         )
         enriched = enriched.withColumn(
             "tx_is_night",
-            ((F.hour(F.col("event_time")) < 6) | (F.hour(F.col("event_time")) >= 22)).cast("integer"),
+            (
+                (F.hour(F.col("event_time")) < 6) | (F.hour(F.col("event_time")) >= 22)
+            ).cast("integer"),
         )
 
         # Serialise to JSON for output

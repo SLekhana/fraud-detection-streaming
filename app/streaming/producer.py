@@ -4,6 +4,7 @@ Kafka Producer — streams transaction events to fraud.transactions.raw topic.
 In production this would be triggered by payment gateway webhooks.
 In development/testing, use the simulate() method to replay IEEE-CIS data.
 """
+
 from __future__ import annotations
 
 import json
@@ -70,7 +71,9 @@ class TransactionProducer:
             future.get(timeout=10)
             return True
         except (KafkaError, Exception) as e:
-            logger.error(f"Failed to send transaction {transaction.get('TransactionID')}: {e}")
+            logger.error(
+                f"Failed to send transaction {transaction.get('TransactionID')}: {e}"
+            )
             self._send_to_dlq(transaction, error=str(e))
             return False
 

@@ -8,6 +8,7 @@ Architecture:
 Trained on legitimate transactions only. High reconstruction error
 = anomalous (potentially fraudulent) transaction.
 """
+
 from __future__ import annotations
 
 import os
@@ -21,6 +22,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 # ─── Model definition ────────────────────────────────────────────────────────
+
 
 class FraudAutoEncoder(nn.Module):
     """
@@ -79,6 +81,7 @@ class FraudAutoEncoder(nn.Module):
 
 
 # ─── Trainer ─────────────────────────────────────────────────────────────────
+
 
 class AutoEncoderTrainer:
     """

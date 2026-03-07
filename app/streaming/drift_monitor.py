@@ -8,6 +8,7 @@ Monitors:
 - Fraud rate anomaly (sudden spikes/drops)
 - Feature distribution shift (PSI - Population Stability Index)
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,6 +43,7 @@ class DriftAlert:
 @dataclass
 class ModelMetrics:
     """Rolling window of model performance metrics."""
+
     precision: float = 0.0
     recall: float = 0.0
     fraud_rate: float = 0.0
@@ -94,7 +96,9 @@ class DriftMonitor:
         slack_webhook: str | None = None,
     ):
         self.window_size = window_size
-        self.precision_threshold = precision_threshold or settings.drift_precision_threshold
+        self.precision_threshold = (
+            precision_threshold or settings.drift_precision_threshold
+        )
         self.recall_threshold = recall_threshold or settings.drift_recall_threshold
         self.psi_threshold = psi_threshold
         self.slack_webhook = slack_webhook or settings.slack_webhook_url
@@ -258,7 +262,11 @@ class DriftMonitor:
                     "color": "#ff0000" if alert.severity == "critical" else "#ffaa00",
                     "fields": [
                         {"title": "Metric", "value": alert.metric, "short": True},
-                        {"title": "Severity", "value": alert.severity.upper(), "short": True},
+                        {
+                            "title": "Severity",
+                            "value": alert.severity.upper(),
+                            "short": True,
+                        },
                         {
                             "title": "Current",
                             "value": f"{alert.current_value:.4f}",

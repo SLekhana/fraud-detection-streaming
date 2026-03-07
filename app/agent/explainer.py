@@ -4,6 +4,7 @@ LLM Fraud Explainability Agent (LangChain + OpenAI GPT-4).
 Takes SHAP values from the ensemble and generates human-readable
 natural-language fraud justifications for flagged transactions.
 """
+
 from __future__ import annotations
 
 
@@ -140,7 +141,11 @@ class RuleBasedExplainer:
                 reasons.append(template)
 
         reason_str = "; ".join(reasons) if reasons else "Multiple risk factors detected"
-        action = "BLOCK" if fraud_score > 0.8 else "REVIEW" if fraud_score > 0.5 else "MONITOR"
+        action = (
+            "BLOCK"
+            if fraud_score > 0.8
+            else "REVIEW" if fraud_score > 0.5 else "MONITOR"
+        )
 
         return (
             f"Transaction ${transaction.get('TransactionAmt', 0):.2f} flagged "
@@ -150,7 +155,13 @@ class RuleBasedExplainer:
         )
 
 
-def get_explainer(use_llm: bool = True) -> FraudExplainabilityAgent | RuleBasedExplainer:
-    if use_llm and settings.openai_api_key and settings.openai_api_key != "sk-placeholder":
+def get_explainer(
+    use_llm: bool = True,
+) -> FraudExplainabilityAgent | RuleBasedExplainer:
+    if (
+        use_llm
+        and settings.openai_api_key
+        and settings.openai_api_key != "sk-placeholder"
+    ):
         return FraudExplainabilityAgent()
     return RuleBasedExplainer()

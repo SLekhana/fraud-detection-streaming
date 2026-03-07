@@ -447,6 +447,7 @@ class TestAPIEndpoints:
         import numpy as _np
 
         mock_model.predict_proba = lambda X: _np.array([0.1] * len(X))
+        mock_model.anomaly_scores = lambda X: _np.array([0.05] * len(X))
 
         tx = {
             "TransactionDT": 86400,
@@ -486,6 +487,7 @@ class TestAPIEndpoints:
         import numpy as _np
 
         mock_model.predict_proba = lambda X: _np.array([0.1] * len(X))
+        mock_model.anomaly_scores = lambda X: _np.array([0.05] * len(X))
 
         payload = {
             "transactions": [

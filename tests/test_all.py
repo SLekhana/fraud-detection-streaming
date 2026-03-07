@@ -445,6 +445,7 @@ class TestAPIEndpoints:
         main_module._model = mock_model
         main_module._model_loaded = True
         import numpy as _np
+
         mock_model.predict_proba = lambda X: _np.array([0.1] * len(X))
 
         tx = {
@@ -483,6 +484,7 @@ class TestAPIEndpoints:
         main_module._model = mock_model
         main_module._model_loaded = True
         import numpy as _np
+
         mock_model.predict_proba = lambda X: _np.array([0.1] * len(X))
 
         payload = {

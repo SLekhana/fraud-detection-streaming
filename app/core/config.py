@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     redis_host: str = "localhost"
     redis_port: int = 6379
     kafka_topic: str = "fraud.transactions.raw"
+    kafka_topic_transactions: str = "fraud-transactions"
     model_dir: str = "models"
     data_dir: str = "data"
     openai_api_key: str = "sk-placeholder"

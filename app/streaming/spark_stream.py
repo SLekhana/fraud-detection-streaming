@@ -11,7 +11,6 @@ scoring path is used.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +47,6 @@ def get_transaction_schema():
         StringType,
         StructField,
         StructType,
-        TimestampType,
     )
 
     return StructType(
@@ -155,7 +153,7 @@ class SparkFraudStream:
 
         # ── Velocity features (windowed aggregations) ──────────────────────
         # Count and sum of transactions per card in 1h and 24h windows
-        velocity_1h = (
+        _ = (
             parsed.withWatermark("event_time", "1 hour")
             .groupBy(F.col("card1"), F.window("event_time", "1 hour"))
             .agg(
@@ -172,7 +170,7 @@ class SparkFraudStream:
             )
         )
 
-        velocity_24h = (
+        _ = (
             parsed.withWatermark("event_time", "24 hours")
             .groupBy(F.col("card1"), F.window("event_time", "24 hours"))
             .agg(
@@ -188,7 +186,7 @@ class SparkFraudStream:
         )
 
         # ── Amount z-score (per-card rolling stats) ────────────────────────
-        card_stats = (
+        _ = (
             parsed.withWatermark("event_time", "7 days")
             .groupBy(F.col("card1"), F.window("event_time", "7 days"))
             .agg(

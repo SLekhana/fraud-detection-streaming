@@ -12,12 +12,9 @@ Endpoints:
 """
 from __future__ import annotations
 
-import logging
 import time
 from contextlib import asynccontextmanager
-from typing import Any
 
-import numpy as np
 import pandas as pd
 import structlog
 from fastapi import FastAPI, HTTPException, Request
@@ -30,7 +27,6 @@ from app.models.schemas import (
     BatchScoreRequest,
     BatchScoreResponse,
     DriftStatusResponse,
-    EvaluationRequest,
     EvaluationResponse,
     FraudScoreResponse,
     HealthResponse,
@@ -138,7 +134,6 @@ def _score_transaction(tx_dict: dict, include_explanation: bool = False) -> Frau
     t0 = time.perf_counter()
 
     # Build features — zero-pads missing columns to match training dimension
-    from app.utils.inference_utils import build_inference_features
     X, feat_cols = build_inference_features(tx_dict, settings.model_path)
 
     if X.shape[1] == 0:
@@ -147,7 +142,7 @@ def _score_transaction(tx_dict: dict, include_explanation: bool = False) -> Frau
     # Score
     fraud_score = float(model.predict_proba(X)[0])
     anomaly_score = float(model.anomaly_scores(X)[0])
-    ae_threshold = model.ae_trainer.threshold or 0.05
+    ae_threshold = (model.ae_trainer.threshold if model.ae_trainer is not None and model.ae_trainer.threshold else 0.05)
     is_fraud = fraud_score >= settings.threshold_ensemble
     anomaly_flag = anomaly_score > ae_threshold
 

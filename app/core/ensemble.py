@@ -22,12 +22,9 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import pandas as pd
-import shap
 import xgboost as xgb
 from imblearn.over_sampling import SMOTE
 from sklearn.metrics import (
@@ -42,6 +39,30 @@ from sklearn.preprocessing import StandardScaler
 
 from app.core.autoencoder import AutoEncoderTrainer
 
+
+
+
+import pickle
+
+class _PlattRemapper(pickle.Unpickler):
+    def find_class(self, module, name):
+        if name == "PlattScaler":
+            from app.core import ensemble
+            return ensemble.PlattScaler
+        return super().find_class(module, name)
+
+class PlattScaler:
+    """Platt scaling calibrator. Must live in ensemble.py so joblib.load always finds it."""
+    def __init__(self):
+        from sklearn.linear_model import LogisticRegression
+        self.lr = LogisticRegression()
+
+    def fit(self, scores, labels):
+        self.lr.fit(scores.reshape(-1, 1), labels)
+        return self
+
+    def predict_proba(self, scores):
+        return self.lr.predict_proba(scores.reshape(-1, 1))[:, 1]
 
 class FraudEnsemble:
     """
@@ -108,7 +129,7 @@ class FraudEnsemble:
             default_xgb["scale_pos_weight"] = scale_pos_weight
 
         self.xgb_model = xgb.XGBClassifier(**default_xgb)
-        self.explainer: Optional[shap.TreeExplainer] = None
+        self.explainer = None
         self.feature_names: list[str] = []
 
     # ── Fit ──────────────────────────────────────────────────────────────────
@@ -190,6 +211,7 @@ class FraudEnsemble:
         )
 
         # 6. SHAP explainer
+        import shap
         self.explainer = shap.TreeExplainer(self.xgb_model)
         self.feature_names = names_aug
 
@@ -205,7 +227,7 @@ class FraudEnsemble:
         X_aug = self._augment(X_scaled) if self.use_ae else X_scaled
         proba = self.xgb_model.predict_proba(X_aug)[:, 1]
         if self.calibrator is not None:
-            proba = self.calibrator.transform(proba)
+            proba = self.calibrator.predict_proba(proba)
         return proba
 
     def predict(self, X: np.ndarray, threshold: float = 0.5) -> np.ndarray:
@@ -346,12 +368,21 @@ class FraudEnsemble:
         import joblib
         ensemble.scaler = joblib.load(os.path.join(directory, "scaler.pkl"))
         ensemble.feature_names = meta.get("feature_names", [])
+        import shap
         ensemble.explainer = shap.TreeExplainer(ensemble.xgb_model)
 
         # Load calibrator if present (backward compatible)
         cal_path = os.path.join(directory, "calibrator.pkl")
         if os.path.exists(cal_path):
-            ensemble.calibrator = joblib.load(cal_path)
+            with open(cal_path, "rb") as _f:
+                import sys as _sys
+                from app.core.ensemble import PlattScaler as _PS
+                _sys.modules.setdefault('__main__', type(_sys)('__main__'))
+                _sys.modules['__main__'].PlattScaler = _PS
+                try:
+                    ensemble.calibrator = joblib.load(_f)
+                except Exception:
+                    ensemble.calibrator = None
 
         return ensemble
 

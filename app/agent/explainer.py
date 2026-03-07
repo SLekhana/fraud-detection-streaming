@@ -3,14 +3,9 @@ LLM Fraud Explainability Agent (LangChain + OpenAI GPT-4).
 
 Takes SHAP values from the ensemble and generates human-readable
 natural-language fraud justifications for flagged transactions.
-Used by fraud analysts and customer service teams.
 """
 from __future__ import annotations
 
-from typing import Optional
-
-from langchain.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
 
@@ -36,13 +31,11 @@ Top Risk Factors (SHAP analysis):
 {shap_summary}
 
 AutoEncoder Anomaly Score: {anomaly_score:.4f} (threshold: {ae_threshold:.4f})
-Anomaly flag: {"⚠️ ANOMALOUS" if anomaly_flag else "✓ Normal pattern"}
 
 Generate a fraud justification and recommended action."""
 
 
 def format_shap_summary(top_features: list[dict]) -> str:
-    """Format SHAP top features into readable bullet points."""
     lines = []
     for i, feat in enumerate(top_features[:7], 1):
         direction = "↑ increases" if feat["shap_value"] > 0 else "↓ decreases"
@@ -54,17 +47,15 @@ def format_shap_summary(top_features: list[dict]) -> str:
 
 
 class FraudExplainabilityAgent:
-    """
-    LangChain agent that generates natural-language fraud justifications
-    from SHAP explanations.
-    """
-
     def __init__(
         self,
         model: str | None = None,
         temperature: float = 0.1,
         api_key: str | None = None,
     ):
+        from langchain.prompts import ChatPromptTemplate
+        from langchain_openai import ChatOpenAI
+
         self.llm = ChatOpenAI(
             model=model or settings.openai_model,
             temperature=temperature,
@@ -86,19 +77,6 @@ class FraudExplainabilityAgent:
         ae_threshold: float,
         fraud_score: float,
     ) -> str:
-        """
-        Generate a natural-language fraud justification.
-
-        Args:
-            transaction: Raw transaction dict (TransactionID, TransactionAmt, etc.)
-            shap_explanation: Output of FraudEnsemble.explain_single()
-            anomaly_score: AutoEncoder reconstruction error
-            ae_threshold: Calibrated AE anomaly threshold
-            fraud_score: XGBoost fraud probability [0, 1]
-
-        Returns:
-            Natural-language fraud justification string.
-        """
         top_features = shap_explanation.get("top_features", [])
         shap_summary = format_shap_summary(top_features)
 
@@ -112,7 +90,6 @@ class FraudExplainabilityAgent:
                 "shap_summary": shap_summary,
                 "anomaly_score": anomaly_score,
                 "ae_threshold": ae_threshold,
-                "anomaly_flag": anomaly_score > ae_threshold,
             }
         )
         return response.content
@@ -125,7 +102,6 @@ class FraudExplainabilityAgent:
         ae_threshold: float,
         fraud_scores: list[float],
     ) -> list[str]:
-        """Explain a batch of flagged transactions."""
         return [
             self.explain(tx, shap_exp, ae_score, ae_threshold, fs)
             for tx, shap_exp, ae_score, fs in zip(
@@ -134,14 +110,7 @@ class FraudExplainabilityAgent:
         ]
 
 
-# ─── Lightweight rule-based fallback (no API key needed) ────────────────────
-
 class RuleBasedExplainer:
-    """
-    Fallback explainer when OpenAI API is not available.
-    Uses SHAP values to generate template-based justifications.
-    """
-
     RISK_TEMPLATES = {
         "velocity_count_1h": "High transaction velocity ({val:.0f} transactions in last hour)",
         "velocity_sum_24h": "Unusually high 24h spend (${val:.2f})",
@@ -182,7 +151,6 @@ class RuleBasedExplainer:
 
 
 def get_explainer(use_llm: bool = True) -> FraudExplainabilityAgent | RuleBasedExplainer:
-    """Factory: return LLM or rule-based explainer based on config."""
     if use_llm and settings.openai_api_key and settings.openai_api_key != "sk-placeholder":
         return FraudExplainabilityAgent()
     return RuleBasedExplainer()

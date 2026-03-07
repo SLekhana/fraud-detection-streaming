@@ -11,9 +11,6 @@ Covers:
 """
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -321,8 +318,8 @@ class TestDriftMonitor:
         scores = np.random.uniform(0.1, 0.4, 500)
         labels = np.zeros(500, dtype=int)
         monitor.set_baseline(scores, labels)
-        for s, l in zip(scores, labels):
-            monitor.record(s, l)
+        for s, label in zip(scores, labels):
+            monitor.record(s, label)
         alerts = monitor.check()
         # Stable distribution — no drift alerts expected
         assert isinstance(alerts, list)

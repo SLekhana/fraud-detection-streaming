@@ -16,15 +16,12 @@ Topics:
 from __future__ import annotations
 
 import json
-import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 import structlog
 from kafka import KafkaConsumer, KafkaProducer
-from kafka.errors import KafkaError
 
 logger = structlog.get_logger()
 
@@ -121,7 +118,6 @@ class FraudConsumer:
 
     def _score(self, tx_dict: dict) -> dict:
         """Score a transaction and return result dict."""
-        import pandas as pd
         from app.utils.inference_utils import build_inference_features
 
         model = self._load_model()
@@ -133,7 +129,7 @@ class FraudConsumer:
         shap_result = model.explain_single(X[0])
 
         latency_ms = (time.perf_counter() - t0) * 1000
-        ae_threshold = model.ae_trainer.threshold or 0.05
+        ae_threshold = (model.ae_trainer.threshold if model.ae_trainer is not None and model.ae_trainer.threshold else 0.05)
 
         return {
             "transaction_id": tx_dict.get("TransactionID"),

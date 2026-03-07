@@ -444,6 +444,8 @@ class TestAPIEndpoints:
         original_loaded = main_module._model_loaded
         main_module._model = mock_model
         main_module._model_loaded = True
+        import numpy as _np
+        mock_model.predict_proba = lambda X: _np.array([0.1] * len(X))
 
         tx = {
             "TransactionDT": 86400,
@@ -480,6 +482,8 @@ class TestAPIEndpoints:
         original_loaded = main_module._model_loaded
         main_module._model = mock_model
         main_module._model_loaded = True
+        import numpy as _np
+        mock_model.predict_proba = lambda X: _np.array([0.1] * len(X))
 
         payload = {
             "transactions": [

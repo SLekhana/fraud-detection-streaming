@@ -40,7 +40,8 @@ class TransactionProducer:
         self.dlq_topic = dlq_topic or settings.kafka_topic_dlq
         self.bootstrap_servers = bootstrap_servers or settings.kafka_bootstrap_servers
         self.retries = retries
-        self._producer: KafkaProducer | None = self._get_producer()
+        self._producer: KafkaProducer | None = None
+        self._producer = self._get_producer()
 
     def _get_producer(self) -> KafkaProducer:
         if self._producer is None:
